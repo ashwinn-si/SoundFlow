@@ -15,7 +15,13 @@ final class AppMix {
     private(set) var pid: pid_t
     private(set) var processObjectID: AudioObjectID
 
+    /// The name macOS reports. Often unhelpful for helper processes.
     let name: String
+    /// User override for `name`. `nil` means "use what macOS said".
+    var customName: String?
+    /// What the UI shows and what the list sorts by.
+    var displayName: String { customName ?? name }
+
     let icon: NSImage?
 
     /// `0...1`. Anything below 1.0 requires a tap; 1.0 plays natively.
@@ -28,6 +34,10 @@ final class AppMix {
     var level: Float = 0
     /// Set when macOS refuses to tap the app (FairPlay-protected audio).
     var isDRMProtected: Bool = false
+
+    /// Starred by the user. Purely a display filter — the menu bar lists only
+    /// these. It has no bearing on whether the app is tapped.
+    var isFavorite: Bool = false
 
     /// Whether this app currently needs to be routed through the mixer.
     var needsTap: Bool { !isDRMProtected && (isMuted || volume < 0.999) }
@@ -69,6 +79,8 @@ final class MixerEngine {
     // MARK: Observable state
 
     private(set) var apps: [AppMix] = []
+    /// The starred subset, in the same order as `apps`.
+    var favoriteApps: [AppMix] { apps.filter(\.isFavorite) }
     private(set) var outputDevices: [AudioDeviceItem] = []
     private(set) var permission: TapPermissionStatus = .undetermined
     private(set) var outputDeviceName: String = ""
@@ -99,6 +111,8 @@ final class MixerEngine {
     private var outputDeviceUID: String?
 
     private var preferences: [String: AppPreference] = [:]
+    private var favorites: Set<String> = []
+    private var customNames: [String: String] = [:]
     private var meterTimer: Timer?
     private var started = false
 
@@ -114,6 +128,8 @@ final class MixerEngine {
         AggregateRoute.destroyOrphanedRoutes()
 
         preferences = Preferences.load()
+        favorites = Preferences.loadFavorites()
+        customNames = Preferences.loadCustomNames()
 
         refreshDevices()
         requestPermission()
@@ -218,17 +234,26 @@ final class MixerEngine {
                 let saved = preferences[bundleID] ?? .default
                 mix.volume = saved.volume
                 mix.isMuted = saved.isMuted
+                mix.isFavorite = favorites.contains(bundleID)
+                mix.customName = customNames[bundleID]
                 mix.isPlaying = process.isRunningOutput
                 updated.append(mix)
             }
         }
 
-        apps = updated.sorted { lhs, rhs in
-            if lhs.isPlaying != rhs.isPlaying { return lhs.isPlaying }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
+        apps = sortApps(updated)
 
         syncRoute()
+    }
+
+    /// Starred first, then whatever is currently playing, then by name.
+    private func sortApps(_ list: [AppMix]) -> [AppMix] {
+        list.sorted { lhs, rhs in
+            if lhs.isFavorite != rhs.isFavorite { return lhs.isFavorite }
+            if lhs.isPlaying != rhs.isPlaying { return lhs.isPlaying }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+                == .orderedAscending
+        }
     }
 
     /// Resolves a user-facing name and icon, skipping processes that are not
@@ -289,6 +314,42 @@ final class MixerEngine {
         syncRoute()
     }
 
+    // MARK: - Naming
+
+    /// Renames an app in the mixer. Blank, whitespace-only, or a name equal to
+    /// the system one clears the override rather than storing a duplicate.
+    ///
+    /// Keyed by bundle id like every other preference, so the label survives
+    /// quitting the app and restarting SoundFlow. Display-only: nothing here
+    /// touches the route.
+    func rename(_ app: AppMix, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == app.name {
+            app.customName = nil
+            customNames.removeValue(forKey: app.bundleID)
+        } else {
+            app.customName = trimmed
+            customNames[app.bundleID] = trimmed
+        }
+        Preferences.saveCustomNames(customNames)
+        apps = sortApps(apps)
+    }
+
+    // MARK: - Favourites
+
+    /// Stars or unstars an app. No route work: the audio path is decided by
+    /// `needsTap` alone, and a star changes nothing about it.
+    func toggleFavorite(_ app: AppMix) {
+        app.isFavorite.toggle()
+        if app.isFavorite {
+            favorites.insert(app.bundleID)
+        } else {
+            favorites.remove(app.bundleID)
+        }
+        Preferences.saveFavorites(favorites)
+        apps = sortApps(apps)
+    }
+
     // MARK: - Route management
 
     /// Rebuilds the route so it contains exactly the apps that need a tap.
@@ -306,9 +367,12 @@ final class MixerEngine {
             return
         }
 
-        // Nothing to do when membership is unchanged.
+        // Nothing to do when membership is unchanged. Compared as a set, not
+        // pairwise: `wanted` follows the display order, and re-sorting the list
+        // (an app starts playing, or gets starred) must not tear down and
+        // rebuild an identical route. `routedApps` stays the slot authority.
         let sameMembership = wanted.count == routedApps.count
-            && zip(wanted, routedApps).allSatisfy { $0 === $1 }
+            && Set(wanted.map(ObjectIdentifier.init)) == Set(routedApps.map(ObjectIdentifier.init))
         if sameMembership, route?.ioProc != nil {
             applyAllGains()
             return

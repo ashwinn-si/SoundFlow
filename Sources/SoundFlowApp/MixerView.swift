@@ -94,17 +94,26 @@ struct MixerView: View {
 
     // MARK: - Apps
 
+    /// The main window lists everything. The menu bar lists only starred apps —
+    /// unless nothing is starred yet, in which case it shows everything rather
+    /// than an empty popover.
+    private var visibleApps: [AppMix] {
+        guard compact else { return engine.apps }
+        let favorites = engine.favoriteApps
+        return favorites.isEmpty ? engine.apps : favorites
+    }
+
     @ViewBuilder
     private var appList: some View {
-        if engine.apps.isEmpty {
+        if visibleApps.isEmpty {
             ContentUnavailableView(
                 "No Audio Apps",
                 systemImage: "speaker.slash",
                 description: Text("Applications appear here once they start using audio.")
             )
         } else {
-            List(engine.apps) { app in
-                AppRowView(app: app, engine: engine)
+            List(visibleApps) { app in
+                AppRowView(app: app, engine: engine, showsFavoriteToggle: !compact)
                     .listRowSeparator(.hidden)
             }
             .listStyle(.inset)

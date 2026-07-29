@@ -15,6 +15,8 @@ struct AppPreference: Codable, Equatable {
 enum Preferences {
 
     private static let storeKey = "SoundFlow.appPreferences"
+    private static let favoritesKey = "SoundFlow.favoriteApps"
+    private static let customNamesKey = "SoundFlow.customNames"
     static let hideDockIconKey = "SoundFlow.hideDockIcon"
 
     static func load() -> [String: AppPreference] {
@@ -31,5 +33,33 @@ enum Preferences {
 
     static func clear() {
         UserDefaults.standard.removeObject(forKey: storeKey)
+    }
+
+    // MARK: - Favourites
+
+    /// Bundle ids the user starred. Kept out of the `AppPreference` blob on
+    /// purpose: adding a field there would break decoding of every existing
+    /// blob (synthesised `Codable` ignores property defaults for missing keys),
+    /// and `clear()` would drop the stars along with the volumes.
+    static func loadFavorites() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: favoritesKey) ?? [])
+    }
+
+    static func saveFavorites(_ favorites: Set<String>) {
+        UserDefaults.standard.set(Array(favorites), forKey: favoritesKey)
+    }
+
+    // MARK: - Custom names
+
+    /// User-chosen display names, keyed by bundle id. The system name for an
+    /// audio helper process is often meaningless ("Browser Helper",
+    /// "callservicesd"), so the user can label it something recognisable.
+    /// Stored separately from the volume blob for the same reason as favourites.
+    static func loadCustomNames() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: customNamesKey) as? [String: String] ?? [:]
+    }
+
+    static func saveCustomNames(_ names: [String: String]) {
+        UserDefaults.standard.set(names, forKey: customNamesKey)
     }
 }

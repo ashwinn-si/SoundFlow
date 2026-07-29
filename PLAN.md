@@ -1,5 +1,13 @@
 # Technical Architecture & Implementation Plan: macOS SoundFlow
 
+> [!NOTE]
+> **Historical design document — not current truth.** This predates the
+> implementation and differs from it in places (0–150% gain range,
+> `AudioEngineController`, `ProcessWatchdog`, `MenuView` — none of which exist;
+> the shipped gain range is `0...1`). Kept for the R&D rationale behind the
+> CoreAudio approach. For how the code actually works, see
+> [CLAUDE.md](CLAUDE.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Executive Summary & Architecture Overview
 
 **"SoundFlow"** is a native macOS Menu Bar application built with **Swift, C/CoreAudio, and SwiftUI** that provides master output/input management and granular **per-application volume control and audio routing**.
