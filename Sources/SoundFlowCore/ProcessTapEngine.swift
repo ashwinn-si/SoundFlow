@@ -181,8 +181,9 @@ public enum TapMaintenance {
                            AudioObjectID(0))
         var destroyed = 0
         for tapID in taps {
-            guard let name = caString(tapID, caAddress(kAudioTapPropertyDescription)) ??
-                             tapName(tapID),
+            // Read the description as the object it is. It is not a string, so
+            // `caString` cannot be used here — see `tapName` below.
+            guard let name = tapName(tapID),
                   name.hasPrefix(ProcessTap.namePrefix) else { continue }
             if AudioHardwareDestroyProcessTap(tapID) == noErr { destroyed += 1 }
         }

@@ -53,15 +53,26 @@ public func caArray<T: BitwiseCopyable>(_ objectID: AudioObjectID,
 }
 
 /// Reads a `CFString` property as a Swift `String`.
+///
+/// Returns `nil` when the selector names something that is not a string. That
+/// check is not paranoia: `kAudioTapPropertyDescription` answers with a
+/// `CATapDescription` object, and the read succeeds — only the *type* is wrong.
+/// Bridging it with `as String` sends `NSString` selectors to an object that
+/// does not implement them, which forwards, throws, and terminates the process.
 public func caString(_ objectID: AudioObjectID,
                      _ address: AudioObjectPropertyAddress) -> String? {
     guard objectID != kAudioObjectUnknown else { return nil }
     var addr = address
-    var cfString: Unmanaged<CFString>?
-    var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-    let status = AudioObjectGetPropertyData(objectID, &addr, 0, nil, &size, &cfString)
-    guard status == noErr, let ref = cfString else { return nil }
-    return ref.takeRetainedValue() as String
+    var unmanaged: Unmanaged<AnyObject>?
+    var size = UInt32(MemoryLayout<Unmanaged<AnyObject>?>.size)
+    let status = AudioObjectGetPropertyData(objectID, &addr, 0, nil, &size, &unmanaged)
+    guard status == noErr, let ref = unmanaged else { return nil }
+
+    // CoreAudio hands these back at +1. Take ownership before the type check so
+    // a non-string property is released rather than leaked.
+    let object = ref.takeRetainedValue()
+    guard CFGetTypeID(object) == CFStringGetTypeID() else { return nil }
+    return (object as! CFString) as String
 }
 
 /// Writes a single fixed-size value.
