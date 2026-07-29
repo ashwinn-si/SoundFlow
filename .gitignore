@@ -1,0 +1,11 @@
+.DS_Store
+/.build
+/Packages
+# Build products: the .app bundle and the distributable disk image.
+/build
+*.dmg
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc

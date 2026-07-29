@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mediaControl}",
+      "name": "Debug SoundFlowSpike",
+      "target": "SoundFlowSpike",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug SoundFlowSpike"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mediaControl}",
+      "name": "Release SoundFlowSpike",
+      "target": "SoundFlowSpike",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release SoundFlowSpike"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mediaControl}",
+      "name": "Debug SoundFlowApp",
+      "target": "SoundFlowApp",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug SoundFlowApp"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mediaControl}",
+      "name": "Release SoundFlowApp",
+      "target": "SoundFlowApp",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release SoundFlowApp"
+    }
+  ]
+}
