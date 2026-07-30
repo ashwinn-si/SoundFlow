@@ -17,6 +17,7 @@ enum Preferences {
     private static let storeKey = "SoundFlow.appPreferences"
     private static let favoritesKey = "SoundFlow.favoriteApps"
     private static let customNamesKey = "SoundFlow.customNames"
+    private static let iconStylesKey = "SoundFlow.appIconStyles"
     static let hideDockIconKey = "SoundFlow.hideDockIcon"
     static let themeKey = "SoundFlow.theme"
 
@@ -62,5 +63,27 @@ enum Preferences {
 
     static func saveCustomNames(_ names: [String: String]) {
         UserDefaults.standard.set(names, forKey: customNamesKey)
+    }
+
+    // MARK: - Icon styles
+
+    /// How each app is drawn: its own icon, or a generated tile with a chosen
+    /// colour and letters. Only apps the user actually customised appear here —
+    /// everything else falls back to `AppIconStyle.default`.
+    ///
+    /// A fourth separate key rather than a field on `AppPreference`, for the
+    /// same reason as favourites and custom names: one more property in that
+    /// blob breaks decoding of every saved one, and `clear()` would take the
+    /// icons down with the volumes.
+    static func loadIconStyles() -> [String: AppIconStyle] {
+        guard let data = UserDefaults.standard.data(forKey: iconStylesKey),
+              let decoded = try? JSONDecoder().decode([String: AppIconStyle].self, from: data)
+        else { return [:] }
+        return decoded
+    }
+
+    static func saveIconStyles(_ styles: [String: AppIconStyle]) {
+        guard let data = try? JSONEncoder().encode(styles) else { return }
+        UserDefaults.standard.set(data, forKey: iconStylesKey)
     }
 }

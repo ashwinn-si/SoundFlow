@@ -100,6 +100,11 @@ final class MixerEngine {
     private(set) var apps: [AppMix] = []
     /// The starred subset, in the same order as `apps`.
     var favoriteApps: [AppMix] { apps.filter(\.isFavorite) }
+    /// The subset currently producing audio, in the same order as `apps`.
+    ///
+    /// A display filter and nothing more. `routedApps` remains the slot
+    /// authority for the IOProc — filtering the list here can never affect it.
+    var playingApps: [AppMix] { apps.filter(\.isPlaying) }
     private(set) var outputDevices: [AudioDeviceItem] = []
     private(set) var inputDevices: [AudioDeviceItem] = []
     private(set) var permission: TapPermissionStatus = .undetermined
@@ -163,6 +168,8 @@ final class MixerEngine {
     private var preferences: [String: AppPreference] = [:]
     private var favorites: Set<String> = []
     private var customNames: [String: String] = [:]
+    /// Only apps the user customised. Absent means `AppIconStyle.default`.
+    private var iconStyles: [String: AppIconStyle] = [:]
     private var meterTimer: Timer?
     private var started = false
     /// Coalesces `UserDefaults` writes: a slider drag calls `persist` on every
@@ -188,6 +195,7 @@ final class MixerEngine {
         preferences = Preferences.load()
         favorites = Preferences.loadFavorites()
         customNames = Preferences.loadCustomNames()
+        iconStyles = Preferences.loadIconStyles()
 
         refreshDevices()
         requestPermission()
@@ -552,6 +560,31 @@ final class MixerEngine {
         }
         Preferences.saveCustomNames(customNames)
         apps = sortApps(apps)
+    }
+
+    // MARK: - Icon styles
+
+    /// How this app should be drawn. Apps the user never customised are absent
+    /// from the store and get the default — their own macOS icon.
+    func iconStyle(for app: AppMix) -> AppIconStyle {
+        iconStyles[app.bundleID] ?? .default
+    }
+
+    /// Display-only, exactly like starring and renaming: the audio path is
+    /// decided by `needsTap` alone, and an icon has no bearing on it. Nothing
+    /// here may touch the route.
+    func setIconStyle(_ style: AppIconStyle, for app: AppMix) {
+        if style == .default {
+            // Storing a default is indistinguishable from not storing it, and
+            // an absent entry is what "reset" means.
+            iconStyles.removeValue(forKey: app.bundleID)
+        } else {
+            iconStyles[app.bundleID] = style
+        }
+        Preferences.saveIconStyles(iconStyles)
+        // Force the list to re-publish: AppMix does not carry the style, so
+        // nothing else would tell the rows to redraw.
+        apps = apps
     }
 
     // MARK: - Favourites
