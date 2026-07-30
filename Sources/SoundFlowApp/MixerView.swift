@@ -169,13 +169,19 @@ struct MixerView: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Button("Open SoundFlow") {
+            Button {
                 openWindow(id: "main")
                 // Needed in .accessory mode, where opening a window does not
                 // bring the app forward on its own.
                 NSApp.activate()
+            } label: {
+                Text("Open SoundFlow")
+                    .font(.system(size: 12, weight: .medium))
             }
-            .buttonStyle(.link)
+            // Not .link: that style hardcodes the system blue and ignores tint,
+            // which left the footer off-theme.
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.accent)
 
             Spacer(minLength: 0)
 
@@ -185,9 +191,10 @@ struct MixerView: View {
                 NSApp.terminate(nil)
             } label: {
                 Image(systemName: "power")
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, weight: .medium))
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.accent)
             .help("Quit SoundFlow")
         }
         .padding(.horizontal, 14)

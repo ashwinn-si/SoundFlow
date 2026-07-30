@@ -378,7 +378,53 @@ tap/aggregate/IOProc plumbing.
 
 ---
 
-## 9. Implemented but unused
+## 9. Power and Apple silicon
+
+```bash
+./scripts/power-test.sh
+```
+
+`audit` checks the binary statically; `sample <label> <seconds>` measures the
+running app; `compare` walks a window-closed vs window-open A/B; `deep` prints
+`powermetrics` commands for you to run yourself.
+
+No sudo required for the parts that matter. `top -stats pid,cpu,power,idlew`
+reports the same **Energy Impact** number Activity Monitor shows plus **idle
+wakeups**, per process. Energy behaviour only exists in the real running app —
+an XCTest process has no menu bar, no SwiftUI redraw loop and no IOProc, which
+is exactly where this app's power goes, so the harness is a shell script rather
+than a test target.
+
+**Idle wakeups are the metric that matters.** Each one pulls a core out of a
+low-power state; a background app that never sleeps is what drains a battery
+overnight. CPU percentage barely moves for an app like this, so it is the
+weaker signal.
+
+Baseline measured 2026-07-30, M4, idle with no apps attenuated:
+
+| Metric | Measured | Target |
+| :--- | :--- | :--- |
+| CPU | 0.11% avg | ≤ 1% |
+| Energy impact | 0.42 | ≤ 1.0 |
+| Idle wakeups | 6.6/s | ≤ 5/s |
+| Threads | 8 | — |
+
+The wakeup number traces to one line: `MixerEngine.meterTimer` fires every
+**0.08 s** and is started unconditionally in `start()`, so it keeps running when
+no route exists, nothing is being metered, and no UI is on screen. 12.5 Hz of
+timer maps to ~6.6 observed wakeups because macOS coalesces them, but it is
+still a floor the app pays for permanently. Two obvious fixes if this ever
+matters: stop the timer when `route == nil`, and suspend it when neither the
+window nor the popover is visible — `updateMeters()` mutates `@Observable`
+state 12.5×/s, which invalidates every visible row whether or not the value
+changed.
+
+`ProcessTapEngine` and `MixerIOProc` are already arm-friendly: the callback
+touches only POD memory, allocates nothing, and takes no locks. One thing does
+run in the hot path that need not — the `lastInputPeak` scan walks every sample
+of input buffer 0 on **every** callback purely for diagnostics.
+
+## 10. Implemented but unused
 
 Live and tested, with no current callers — know they exist before writing
 something similar.

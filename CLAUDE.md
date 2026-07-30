@@ -34,6 +34,7 @@ swift build --product SoundFlowApp
 | Headless engine smoke test | `./scripts/run-spike.sh` |
 | Engine self-test (pass/fail) | `./scripts/run-spike.sh --selftest` |
 | AddressSanitizer build | `./scripts/build-asan.sh` |
+| Power / Apple-silicon check | `./scripts/power-test.sh` (no sudo needed) |
 | One-time signing identity setup | `./scripts/setup-signing.sh` |
 
 **Never `swift run` the app or the spike.** A bare SwiftPM binary has no stable
@@ -77,6 +78,9 @@ what destroys the live taps.
 | `LaunchAtLogin.swift` | `SMAppService.mainApp` wrapper. No mirrored preference — the service is the source of truth. |
 | `SoundFlowApp.swift` | Scenes, `AppDelegate`, teardown on quit. |
 | `Sources/SoundFlowSpikeMain/` | CLI smoke test + `--selftest`. Not shipped. |
+
+`README.md` is the public-facing page: what the app does, install steps,
+limitations. Keep its feature list in step with what actually ships.
 
 `PLAN.md` is the **original design document, not current truth.** It predates
 the implementation and differs from it (0–150% gain range, `AudioEngineController`,
