@@ -84,16 +84,26 @@ struct Sidebar: View {
                 row(.devices)
             }
 
+            // Every row here is one shape: leading `Label`, trailing control.
+            // That is what makes the block line up — with itself and with the
+            // navigation rows above, whose icon and text sit at the same two
+            // x positions. A bare `Picker("Theme",…)` puts its title at the
+            // margin with no icon, and a default macOS `Toggle` leads with the
+            // checkbox and pushes the icon inward, so the section had three
+            // different leading edges.
             Section("Settings") {
-                Picker("Theme", selection: $themeID) {
+                Picker(selection: $themeID) {
                     ForEach(Themes.all) { theme in
                         Text(theme.name).tag(theme.id)
                     }
+                } label: {
+                    Label("Theme", systemImage: "paintpalette")
                 }
 
                 Toggle(isOn: $launchAtLogin) {
                     Label("Launch at login", systemImage: "power")
                 }
+                .toggleStyle(.switch)
                 .onChange(of: launchAtLogin) { _, enabled in
                     if pendingProgrammaticValue == enabled {
                         pendingProgrammaticValue = nil
@@ -112,6 +122,7 @@ struct Sidebar: View {
                 Toggle(isOn: $hideDockIcon) {
                     Label("Hide Dock icon", systemImage: "dock.rectangle")
                 }
+                .toggleStyle(.switch)
                 .onChange(of: hideDockIcon) { _, hidden in
                     // .accessory removes the Dock icon and the menu bar entry
                     // stays as the only way in.
@@ -123,7 +134,13 @@ struct Sidebar: View {
                 } label: {
                     Label("Reset Volumes", systemImage: "arrow.counterclockwise")
                         .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
+                // .plain, so it draws as a row like everything else. The
+                // default button background made it a filled pill inset from
+                // both margins, which broke the column on its own.
+                .buttonStyle(.plain)
                 // Confirmed rather than immediate: it discards every saved
                 // level, and there is no undo.
                 .alert("Reset all volumes?", isPresented: $showResetAlert) {
