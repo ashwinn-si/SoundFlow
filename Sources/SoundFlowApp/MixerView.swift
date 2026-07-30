@@ -5,20 +5,25 @@ import SoundFlowCore
 
 /// The mixer.
 ///
-/// Two layouts from one view. The main window gets a nav bar and three tabs;
-/// the menu bar popover stays a single lean list, because a dropdown is for a
-/// two-second adjustment and tabs would make it a chore.
+/// Two layouts from one view. The main window gets a sidebar and a content
+/// pane; the menu bar popover stays a single lean list, because a dropdown is
+/// for a two-second adjustment and navigation would make it a chore — and a
+/// 158pt rail does not fit in a 320pt popover anyway.
 ///
 /// Colour comes from exactly one place: the theme accent, applied once as a
-/// `tint` at the root so sliders, stars and toggles inherit it. Everything else
-/// is system material and automatic light/dark.
+/// `tint` at the root so sliders, stars and toggles inherit it, and once more
+/// as the background wash. Everything else is system material and automatic
+/// light/dark.
 struct MixerView: View {
     let engine: MixerEngine
     /// Trimmed layout for the menu bar popover.
     var compact = false
 
     @AppStorage(Preferences.themeKey) private var themeID = Themes.system.id
-    @State private var tab: MixerTab = .mixer
+    @State private var tab: MixerTab = .allApps
+    /// The app whose name and icon are being edited. Hosted here rather than in
+    /// each row so there is one sheet, not one per visible app.
+    @State private var editing: AppMix?
     @Environment(\.openWindow) private var openWindow
 
     private var theme: Theme { Themes.theme(id: themeID) }
@@ -33,79 +38,73 @@ struct MixerView: View {
         }
         .tint(theme.accent)
         .environment(\.themeAccent, theme.accent)
-        .frame(minWidth: compact ? 300 : 400,
-               minHeight: compact ? 260 : 420)
+        .background(AccentWash(accent: theme.accent))
+        .frame(minWidth: compact ? 300 : 560,
+               minHeight: compact ? 260 : 440)
         .frame(width: compact ? 320 : nil)
+        .sheet(item: $editing) { app in
+            CustomizeAppSheet(app: app, engine: engine)
+                .tint(theme.accent)
+                .environment(\.themeAccent, theme.accent)
+        }
     }
 
     // MARK: - Main window
 
+    /// A `NavigationSplitView` rather than an `HStack` of two panes.
+    ///
+    /// It is what buys the platform behaviour that a hand-built split cannot:
+    /// the sidebar runs the full height of the window with the traffic lights
+    /// sitting on it, the collapse control appears in the toolbar for free, and
+    /// the title belongs to the real titlebar instead of being body text drawn
+    /// near the top of the content.
     @ViewBuilder
     private var windowLayout: some View {
         if engine.permission == .denied {
+            // The rail is meaningless without permission — every filter would
+            // list apps whose sliders do nothing — so it is not drawn at all.
             PermissionView(engine: engine)
         } else {
-            VStack(spacing: 0) {
-                NavBar(selection: $tab)
-                Divider()
-
-                switch tab {
-                case .mixer:
-                    mixerTab
-                case .devices:
-                    DevicesView(engine: engine)
-                case .settings:
-                    SettingsView(engine: engine)
-                }
+            NavigationSplitView {
+                Sidebar(engine: engine, selection: $tab)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 215, max: 280)
+            } detail: {
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .navigationTitle(tab.title)
+                    .navigationSubtitle(subtitle)
             }
+            .navigationSplitViewStyle(.balanced)
         }
     }
 
-    /// The master level stays here rather than moving to Devices with the
-    /// pickers — it is adjusted constantly, and burying it a tab away would be
-    /// a downgrade. Only device *selection* moved.
-    private var mixerTab: some View {
-        VStack(spacing: 0) {
-            if engine.hasMasterVolumeControl {
-                masterRow
-                Divider()
-            }
-            appList
+    /// Empty rather than `nil`: `navigationSubtitle` takes a `String`, and an
+    /// empty one simply draws nothing.
+    private var subtitle: String {
+        switch tab {
+        case .allApps: "\(engine.apps.count) apps"
+        case .starred: "\(engine.favoriteApps.count) in menu bar"
+        case .playing: "\(engine.playingApps.count) making sound"
+        default: ""
         }
     }
 
-    private var masterRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "speaker.wave.2.fill")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .frame(width: 28)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(engine.outputDeviceName)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-
-                    Spacer(minLength: 0)
-
-                    Text("\(Int(engine.masterVolume * 100))%")
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                Slider(
-                    value: Binding(
-                        get: { Double(engine.masterVolume) },
-                        set: { engine.masterVolume = Float($0) }
-                    ),
-                    in: 0...1
-                )
-                .controlSize(.small)
-            }
+    @ViewBuilder
+    private var content: some View {
+        switch tab {
+        case .allApps:
+            appList(engine.apps) { allAppsEmpty }
+        case .starred:
+            appList(engine.favoriteApps) { starredEmpty }
+        case .playing:
+            appList(engine.playingApps) { playingEmpty }
+        case .devices:
+            DevicesView(engine: engine)
+        case .developer:
+            DeveloperView()
+        case .version:
+            VersionView()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
     // MARK: - Menu bar
@@ -117,7 +116,7 @@ struct MixerView: View {
             } else {
                 compactHeader
                 Divider()
-                appList
+                appList(visibleCompactApps) { allAppsEmpty }
             }
 
             Divider()
@@ -129,22 +128,16 @@ struct MixerView: View {
     /// switching a microphone is not a menu bar errand.
     private var compactHeader: some View {
         VStack(spacing: 10) {
-            HStack {
-                Text("Output")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Picker("Output", selection: outputSelection) {
-                    ForEach(engine.outputDevices) { device in
-                        Text(device.name).tag(device.id)
-                    }
+            // Full width, unlabelled: at 320pt the device name is the only thing
+            // worth the room, and "Output" above a speaker slider says nothing
+            // the slider does not.
+            Picker("Output", selection: outputSelection) {
+                ForEach(engine.outputDevices) { device in
+                    Text(device.name).tag(device.id)
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .fixedSize()
-
-                Spacer(minLength: 0)
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
 
             if engine.hasMasterVolumeControl {
                 LevelSlider(
@@ -217,30 +210,98 @@ struct MixerView: View {
 
     // MARK: - Apps
 
-    /// The main window lists everything. The menu bar lists only starred apps —
-    /// unless nothing is starred yet, in which case it shows everything rather
-    /// than an empty popover.
-    private var visibleApps: [AppMix] {
-        guard compact else { return engine.apps }
+    /// The menu bar lists only starred apps — unless nothing is starred yet, in
+    /// which case it shows everything rather than an empty popover.
+    private var visibleCompactApps: [AppMix] {
         let favorites = engine.favoriteApps
         return favorites.isEmpty ? engine.apps : favorites
     }
 
     @ViewBuilder
-    private var appList: some View {
-        if visibleApps.isEmpty {
-            ContentUnavailableView(
-                "No Audio Apps",
-                systemImage: "speaker.slash",
-                description: Text("Applications appear here once they start using audio.")
-            )
+    private func appList<Empty: View>(
+        _ apps: [AppMix],
+        @ViewBuilder empty: () -> Empty
+    ) -> some View {
+        if apps.isEmpty {
+            empty()
         } else {
-            List(visibleApps) { app in
-                AppRowView(app: app, engine: engine, showsFavoriteToggle: !compact)
+            List(apps) { app in
+                AppRowView(app: app,
+                           engine: engine,
+                           showsRowActions: !compact,
+                           onEdit: { editing = $0 })
                     .listRowSeparator(.hidden)
             }
             .listStyle(.inset)
-            .scrollContentBackground(compact ? .hidden : .automatic)
+            .scrollContentBackground(.hidden)
         }
+    }
+
+    private var allAppsEmpty: some View {
+        ContentUnavailableView(
+            "No Audio Apps",
+            systemImage: "speaker.slash",
+            description: Text("Applications appear here once they start using audio.")
+        )
+    }
+
+    private var starredEmpty: some View {
+        ContentUnavailableView(
+            "Nothing Starred",
+            systemImage: "star",
+            description: Text("Star an app to keep it in the menu bar popover.")
+        )
+    }
+
+    private var playingEmpty: some View {
+        ContentUnavailableView(
+            "Nothing Playing",
+            systemImage: "waveform",
+            description: Text("Apps appear here while they are producing audio.")
+        )
+    }
+}
+
+// MARK: - Accent wash
+
+/// The window's background: a bloom of the theme accent from the top-left, and
+/// a fainter counter-light from the bottom-right.
+///
+/// The stops are explicit rather than an even three-colour spread, which falls
+/// off too fast and reads as a smudge instead of a wash. Light mode gets a much
+/// gentler bloom — what reads as elegant on charcoal reads as a stain on white.
+struct AccentWash: View {
+    let accent: Color
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var isDark: Bool { colorScheme == .dark }
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.background)
+
+            RadialGradient(
+                gradient: Gradient(stops: [
+                    .init(color: accent.opacity(isDark ? 0.26 : 0.15), location: 0),
+                    .init(color: accent.opacity(isDark ? 0.09 : 0.055), location: 0.36),
+                    .init(color: accent.opacity(0), location: 0.70)
+                ]),
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 620
+            )
+
+            RadialGradient(
+                gradient: Gradient(stops: [
+                    .init(color: accent.opacity(isDark ? 0.07 : 0.04), location: 0),
+                    .init(color: accent.opacity(0), location: 0.62)
+                ]),
+                center: .bottomTrailing,
+                startRadius: 0,
+                endRadius: 480
+            )
+        }
+        .ignoresSafeArea()
     }
 }

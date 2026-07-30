@@ -46,14 +46,24 @@ public final class AudioProcessRegistry: @unchecked Sendable {
 
     // MARK: - Enumeration
 
+    /// Every process object the HAL currently knows about, unfiltered.
+    private func currentProcessObjectIDs() -> [AudioObjectID] {
+        caArray(AudioObjectID(kAudioObjectSystemObject),
+                caAddress(kAudioHardwarePropertyProcessObjectList),
+                AudioObjectID(0))
+    }
+
     /// Current process list. Excludes SoundFlow itself and processes with no
     /// bundle identifier (coreaudiod, system agents — nothing a user would mix).
+    ///
+    /// **This also re-syncs the per-process output listeners**, which is how
+    /// processes that appear later come to be observed. It is a read with a
+    /// side effect, deliberately: the alternative is a caller remembering to
+    /// re-register after every process-list change, and forgetting once is
+    /// silent — playback state simply stops updating.
     public func snapshot() -> [AudioProcessInfo] {
         let ownPID = ProcessInfo.processInfo.processIdentifier
-
-        let objectIDs = caArray(AudioObjectID(kAudioObjectSystemObject),
-                                caAddress(kAudioHardwarePropertyProcessObjectList),
-                                AudioObjectID(0))
+        let objectIDs = currentProcessObjectIDs()
 
         var result: [AudioProcessInfo] = []
         for objectID in objectIDs {
@@ -88,11 +98,26 @@ public final class AudioProcessRegistry: @unchecked Sendable {
 
     // MARK: - Change monitoring
 
-    /// Installs a listener on the process list. Idempotent.
+    /// Installs a listener on the process list, and one on every process that
+    /// already exists. Idempotent.
+    ///
+    /// The second half matters more than it looks. The process-list listener
+    /// only fires when a process appears or disappears — it says nothing about
+    /// an existing process starting to play. Without seeding the per-process
+    /// `IsRunningOutput` listeners here, any app that was already running when
+    /// monitoring began could start producing audio and never be noticed, until
+    /// something unrelated changed the process list.
+    ///
+    /// The lock is released before that seeding: `refreshOutputListeners` takes
+    /// the same `NSLock`, which is not recursive, so holding it across the call
+    /// would deadlock on launch.
     public func startMonitoring() {
         lock.lock()
-        defer { lock.unlock() }
-        guard !isListening else { return }
+
+        guard !isListening else {
+            lock.unlock()
+            return
+        }
         isListening = true
 
         let context = Unmanaged.passRetained(self).toOpaque()
@@ -111,7 +136,13 @@ public final class AudioProcessRegistry: @unchecked Sendable {
             Unmanaged<AudioProcessRegistry>.fromOpaque(context).release()
             listenerContext = nil
             isListening = false
+            lock.unlock()
+            return
         }
+
+        lock.unlock()
+
+        refreshOutputListeners(for: currentProcessObjectIDs())
     }
 
     /// Removes every listener installed by this registry and balances its retains.

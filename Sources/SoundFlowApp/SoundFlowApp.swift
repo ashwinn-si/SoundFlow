@@ -13,7 +13,9 @@ struct SoundFlowApp: App {
         Window("SoundFlow", id: "main") {
             MixerView(engine: delegate.engine)
         }
-        .defaultSize(width: 420, height: 560)
+        // Wider than it is tall now: the 158pt sidebar has to sit beside the
+        // list rather than above it.
+        .defaultSize(width: 620, height: 480)
         .windowResizability(.contentMinSize)
 
         MenuBarExtra("SoundFlow", systemImage: "slider.horizontal.3") {
@@ -21,9 +23,9 @@ struct SoundFlowApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // No `Settings` scene: settings live in the main window as a tab. With
-        // the Dock icon hidden there is no app menu, so a separate settings
-        // scene would be unreachable.
+        // No `Settings` scene: theme, startup and reset live in the sidebar.
+        // With the Dock icon hidden there is no app menu, so a separate
+        // settings scene would be unreachable.
     }
 }
 
