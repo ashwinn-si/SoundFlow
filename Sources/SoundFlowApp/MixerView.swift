@@ -41,9 +41,7 @@ struct MixerView: View {
     private var header: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("Output")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                deviceLabel("Output")
 
                 Picker("Output", selection: outputSelection) {
                     ForEach(engine.outputDevices) { device in
@@ -55,28 +53,48 @@ struct MixerView: View {
                 .fixedSize()
 
                 Spacer(minLength: 0)
+
+                // The menu bar has its own gear in the footer.
+                if !compact { settingsButton }
             }
 
             if engine.hasMasterVolumeControl {
-                HStack(spacing: 8) {
-                    Image(systemName: "speaker.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14)
-
-                    Slider(
-                        value: Binding(
-                            get: { Double(engine.masterVolume) },
-                            set: { engine.masterVolume = Float($0) }
-                        ),
-                        in: 0...1
+                levelSlider(
+                    symbol: "speaker.fill",
+                    value: Binding(
+                        get: { Double(engine.masterVolume) },
+                        set: { engine.masterVolume = Float($0) }
                     )
-                    .controlSize(.small)
+                )
+            }
 
-                    Text("\(Int(engine.masterVolume * 100))%")
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, alignment: .trailing)
+            // Input is the system default capture device. Changing it is a
+            // system-wide switch, exactly like the Sound settings pane — it has
+            // nothing to do with the per-app output route.
+            if !engine.inputDevices.isEmpty {
+                HStack {
+                    deviceLabel("Input")
+
+                    Picker("Input", selection: inputSelection) {
+                        ForEach(engine.inputDevices) { device in
+                            Text(device.name).tag(device.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+
+                    Spacer(minLength: 0)
+                }
+
+                if engine.hasInputVolumeControl {
+                    levelSlider(
+                        symbol: "mic.fill",
+                        value: Binding(
+                            get: { Double(engine.inputVolume) },
+                            set: { engine.inputVolume = Float($0) }
+                        )
+                    )
                 }
             }
 
@@ -91,12 +109,57 @@ struct MixerView: View {
         .padding(.vertical, 10)
     }
 
+    /// Fixed width so the Output and Input pickers line up.
+    private func deviceLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(width: 44, alignment: .leading)
+    }
+
+    private func levelSlider(symbol: String, value: Binding<Double>) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+
+            Slider(value: value, in: 0...1)
+                .controlSize(.small)
+
+            Text("\(Int(value.wrappedValue * 100))%")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .trailing)
+        }
+    }
+
+    private var settingsButton: some View {
+        SettingsLink {
+            Image(systemName: "gearshape")
+                .font(.system(size: 12))
+        }
+        .buttonStyle(.borderless)
+        .help("Settings")
+    }
+
     private var outputSelection: Binding<AudioObjectID> {
         Binding(
             get: { engine.outputDevices.first { $0.name == engine.outputDeviceName }?.id ?? 0 },
             set: { newID in
                 if let device = engine.outputDevices.first(where: { $0.id == newID }) {
                     engine.selectOutputDevice(device)
+                }
+            }
+        )
+    }
+
+    private var inputSelection: Binding<AudioObjectID> {
+        Binding(
+            get: { engine.inputDeviceID },
+            set: { newID in
+                if let device = engine.inputDevices.first(where: { $0.id == newID }) {
+                    engine.selectInputDevice(device)
                 }
             }
         )
@@ -116,12 +179,7 @@ struct MixerView: View {
 
             Spacer(minLength: 0)
 
-            SettingsLink {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12))
-            }
-            .buttonStyle(.borderless)
-            .help("Settings")
+            settingsButton
 
             Button {
                 // Routes through applicationWillTerminate, which destroys every

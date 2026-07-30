@@ -63,11 +63,11 @@ what destroys the live taps.
 | `AggregateRoute.swift` | Private aggregate device: taps in, one physical output out. |
 | `MixerIOProc.swift` | The real-time callback. Channel mapping, gain, mixing, RMS. |
 | `RouteWatchdog.swift` | Detects the zero-buffer failure and asks the owner to rebuild. |
-| `AudioDeviceManager.swift` | Device enumeration, default-device changes, master volume/mute. |
+| `AudioDeviceManager.swift` | Device enumeration, default-device changes, volume/mute. Volume and mute take a `scope:` — the same selectors address playback and capture. |
 | `TapPermission.swift` | TCC state. Screen-capture preflight, **not** tap success. |
 | `Sources/SoundFlowApp/` | The app. |
 | `MixerEngine.swift` | `@MainActor @Observable`. Owns `AppMix` list, prefs, and the route. The only place that decides what gets tapped. |
-| `MixerView.swift` | Shared UI for the window and the menu bar (`compact` flag). Owns the menu bar footer: Open / Settings / Quit. |
+| `MixerView.swift` | Shared UI for the window and the menu bar (`compact` flag). Output + input device pickers, master/input level, Settings button, and the menu bar footer: Open / Settings / Quit. |
 | `AppRowView.swift` | One app row: icon, name (double-click to rename), slider, %, star, mute, context menu. |
 | `Preferences.swift` | `UserDefaults`: volume/mute blob, favourites, custom names, hide-Dock-icon. |
 | `LaunchAtLogin.swift` | `SMAppService.mainApp` wrapper. No mirrored preference — the service is the source of truth. |

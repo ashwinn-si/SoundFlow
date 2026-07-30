@@ -101,8 +101,10 @@ final class MixerEngine {
     /// The starred subset, in the same order as `apps`.
     var favoriteApps: [AppMix] { apps.filter(\.isFavorite) }
     private(set) var outputDevices: [AudioDeviceItem] = []
+    private(set) var inputDevices: [AudioDeviceItem] = []
     private(set) var permission: TapPermissionStatus = .undetermined
     private(set) var outputDeviceName: String = ""
+    private(set) var inputDeviceName: String = ""
     /// Set when the route cannot be built, so the UI can explain itself.
     private(set) var routeError: String?
 
@@ -114,6 +116,20 @@ final class MixerEngine {
     }
 
     var hasMasterVolumeControl: Bool = true
+
+    /// Input gain for the default capture device. Separate from `masterVolume`
+    /// because the same selectors address playback and capture by scope.
+    var inputVolume: Float = 1.0 {
+        didSet {
+            guard abs(inputVolume - oldValue) > 0.0001 else { return }
+            deviceManager.setMasterVolume(inputVolume,
+                                          deviceID: inputDeviceID,
+                                          scope: kAudioObjectPropertyScopeInput)
+        }
+    }
+
+    /// Plenty of microphones expose no settable gain, so the slider hides.
+    var hasInputVolumeControl: Bool = true
 
     // MARK: Private state
 
@@ -128,6 +144,9 @@ final class MixerEngine {
 
     private var outputDeviceID: AudioObjectID = kAudioObjectUnknown
     private var outputDeviceUID: String?
+    /// Readable by the UI so the input picker can match on identity rather than
+    /// on a display name, which is not unique across devices.
+    private(set) var inputDeviceID: AudioObjectID = kAudioObjectUnknown
 
     private var preferences: [String: AppPreference] = [:]
     private var favorites: Set<String> = []
@@ -198,7 +217,10 @@ final class MixerEngine {
     // MARK: - Devices
 
     func refreshDevices() {
-        outputDevices = deviceManager.getAllDevices().filter(\.isOutput)
+        let all = deviceManager.getAllDevices()
+        outputDevices = all.filter(\.isOutput)
+        inputDevices = all.filter(\.isInput)
+        refreshInputState()
 
         let previousUID = outputDeviceUID
         outputDeviceID = deviceManager.getDefaultOutputDeviceID() ?? kAudioObjectUnknown
@@ -216,11 +238,25 @@ final class MixerEngine {
     }
 
     func selectOutputDevice(_ device: AudioDeviceItem) {
-        var address = caAddress(kAudioHardwarePropertyDefaultOutputDevice)
-        var deviceID = device.id
-        AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
-                                   UInt32(MemoryLayout<AudioObjectID>.size), &deviceID)
+        deviceManager.setDefaultDevice(device.id, isInput: false)
         refreshDevices()
+    }
+
+    func selectInputDevice(_ device: AudioDeviceItem) {
+        deviceManager.setDefaultDevice(device.id, isInput: true)
+        refreshInputState()
+    }
+
+    /// Re-reads the default capture device and its gain. Split out so switching
+    /// an input never touches the output route.
+    private func refreshInputState() {
+        inputDeviceID = deviceManager.getDefaultInputDeviceID() ?? kAudioObjectUnknown
+        inputDeviceName = inputDevices.first { $0.id == inputDeviceID }?.name ?? "Unknown"
+
+        hasInputVolumeControl = deviceManager.hasSettableVolume(
+            deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput)
+        inputVolume = deviceManager.getMasterVolume(
+            deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput) ?? 1.0
     }
 
     // MARK: - App list

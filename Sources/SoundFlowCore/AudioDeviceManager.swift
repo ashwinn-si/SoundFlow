@@ -119,6 +119,31 @@ public class AudioDeviceManager: @unchecked Sendable {
         return status == noErr ? deviceID : nil
     }
     
+    /// Makes `deviceID` the system default for playback or capture.
+    @discardableResult
+    public func setDefaultDevice(_ deviceID: AudioObjectID, isInput: Bool) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: isInput
+                ? kAudioHardwarePropertyDefaultInputDevice
+                : kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value = deviceID
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            UInt32(MemoryLayout<AudioObjectID>.size),
+            &value
+        )
+        if status != noErr {
+            print("[AudioDeviceManager] setDefaultDevice failed: \(status)")
+        }
+        return status == noErr
+    }
+
     // MARK: - Device Change Monitoring
 
     /// Callback fired on the main queue whenever audio devices are added or removed.
@@ -196,32 +221,40 @@ public class AudioDeviceManager: @unchecked Sendable {
     // is what makes this work across built-in speakers, USB DACs and AirPods —
     // the previous single-selector read simply returned nil on many devices.
 
-    /// Candidate property addresses for a device's output volume, best first.
-    private func volumeAddresses() -> [AudioObjectPropertyAddress] {
+    /// Candidate property addresses for a device's volume, best first.
+    ///
+    /// `scope` selects playback or capture: the same selectors carry a device's
+    /// input gain when addressed with `kAudioObjectPropertyScopeInput`.
+    private func volumeAddresses(
+        scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeOutput
+    ) -> [AudioObjectPropertyAddress] {
         [
             AudioObjectPropertyAddress(
                 mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
-                mScope: kAudioObjectPropertyScopeOutput,
+                mScope: scope,
                 mElement: kAudioObjectPropertyElementMain),
             AudioObjectPropertyAddress(
                 mSelector: kAudioDevicePropertyVolumeScalar,
-                mScope: kAudioObjectPropertyScopeOutput,
+                mScope: scope,
                 mElement: kAudioObjectPropertyElementMain),
             AudioObjectPropertyAddress(
                 mSelector: kAudioDevicePropertyVolumeScalar,
-                mScope: kAudioObjectPropertyScopeOutput,
+                mScope: scope,
                 mElement: 1),
             AudioObjectPropertyAddress(
                 mSelector: kAudioDevicePropertyVolumeScalar,
-                mScope: kAudioObjectPropertyScopeOutput,
+                mScope: scope,
                 mElement: 2)
         ]
     }
 
-    /// Gets the master output volume scalar (0.0–1.0), or `nil` if the device
-    /// has no software-controllable volume (common for HDMI and some DACs).
-    public func getMasterVolume(deviceID: AudioObjectID) -> Float? {
-        for var address in volumeAddresses() {
+    /// Gets the master volume scalar (0.0–1.0), or `nil` if the device has no
+    /// software-controllable volume (common for HDMI, some DACs, and plenty of
+    /// microphones).
+    public func getMasterVolume(deviceID: AudioObjectID,
+                                scope: AudioObjectPropertyScope
+                                    = kAudioObjectPropertyScopeOutput) -> Float? {
+        for var address in volumeAddresses(scope: scope) {
             guard AudioObjectHasProperty(deviceID, &address) else { continue }
             var volume: Float32 = 0
             var size = UInt32(MemoryLayout<Float32>.size)
@@ -233,8 +266,10 @@ public class AudioDeviceManager: @unchecked Sendable {
     }
 
     /// `true` when the device's volume can be changed in software.
-    public func hasSettableVolume(deviceID: AudioObjectID) -> Bool {
-        for var address in volumeAddresses() {
+    public func hasSettableVolume(deviceID: AudioObjectID,
+                                  scope: AudioObjectPropertyScope
+                                      = kAudioObjectPropertyScopeOutput) -> Bool {
+        for var address in volumeAddresses(scope: scope) {
             guard AudioObjectHasProperty(deviceID, &address) else { continue }
             var settable: DarwinBoolean = false
             if AudioObjectIsPropertySettable(deviceID, &address, &settable) == noErr,
@@ -245,17 +280,20 @@ public class AudioDeviceManager: @unchecked Sendable {
         return false
     }
 
-    /// Sets the master output volume scalar (0.0–1.0).
+    /// Sets the master volume scalar (0.0–1.0) for the given scope.
     ///
     /// Writes every settable channel element rather than stopping at the first,
     /// so devices that only expose per-channel volume stay balanced.
     @discardableResult
-    public func setMasterVolume(_ scalar: Float, deviceID: AudioObjectID) -> Bool {
+    public func setMasterVolume(_ scalar: Float,
+                                deviceID: AudioObjectID,
+                                scope: AudioObjectPropertyScope
+                                    = kAudioObjectPropertyScopeOutput) -> Bool {
         var volume = Float32(max(0, min(1, scalar)))
         let size = UInt32(MemoryLayout<Float32>.size)
         var wroteAny = false
 
-        for var address in volumeAddresses() {
+        for var address in volumeAddresses(scope: scope) {
             guard AudioObjectHasProperty(deviceID, &address) else { continue }
             var settable: DarwinBoolean = false
             guard AudioObjectIsPropertySettable(deviceID, &address, &settable) == noErr,
@@ -274,11 +312,13 @@ public class AudioDeviceManager: @unchecked Sendable {
 
     // MARK: - Master Mute Control
 
-    /// Returns `true` if the device's output is muted.
-    public func isMuted(deviceID: AudioObjectID) -> Bool? {
+    /// Returns `true` if the device is muted in the given scope.
+    public func isMuted(deviceID: AudioObjectID,
+                        scope: AudioObjectPropertyScope
+                            = kAudioObjectPropertyScopeOutput) -> Bool? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyMute,
-            mScope: kAudioObjectPropertyScopeOutput,
+            mScope: scope,
             mElement: kAudioObjectPropertyElementMain
         )
         var muted: UInt32 = 0
@@ -287,12 +327,15 @@ public class AudioDeviceManager: @unchecked Sendable {
         return status == noErr ? (muted != 0) : nil
     }
 
-    /// Sets the mute state on the device's output.
+    /// Sets the mute state on the device in the given scope.
     @discardableResult
-    public func setMuted(_ muted: Bool, deviceID: AudioObjectID) -> Bool {
+    public func setMuted(_ muted: Bool,
+                         deviceID: AudioObjectID,
+                         scope: AudioObjectPropertyScope
+                             = kAudioObjectPropertyScopeOutput) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyMute,
-            mScope: kAudioObjectPropertyScopeOutput,
+            mScope: scope,
             mElement: kAudioObjectPropertyElementMain
         )
         var value: UInt32 = muted ? 1 : 0

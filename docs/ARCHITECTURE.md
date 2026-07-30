@@ -275,6 +275,16 @@ without hopping to the main actor.
   dimmed to 65%, and keep working controls — the level is saved and applies the
   next time the app produces audio. Unstarring an inactive row removes it
   outright, since nothing is left to show.
+- The header carries **Output** and **Input** device pickers plus a level
+  slider for each. Input is the *system default capture device*: selecting one
+  writes `kAudioHardwarePropertyDefaultInputDevice`, exactly what the Sound
+  settings pane does, and has nothing to do with the per-app output route —
+  `selectInputDevice` calls `refreshInputState()` only, never `refreshDevices()`.
+  Either slider hides when the device exposes no settable volume
+  (`hasMasterVolumeControl` / `hasInputVolumeControl`); that is common for HDMI
+  outputs and for most microphones.
+- A **Settings** gear sits in the header in the main window only — the menu bar
+  has its own in the footer. Both use SwiftUI's `SettingsLink`.
 - The menu bar popover has a footer (`compact` only) with **Open SoundFlow**,
   **Settings**, and **Quit**. It renders even when permission is denied — with
   the Dock icon hidden, this is the only route back into the app, and Quit is
@@ -355,4 +365,4 @@ something similar.
 | `TapPermission.verifyAudioFlows(...)` | Ground-truth permission check, ~2 s. |
 | `ProcessTap.createGlobal(excluding:)` | Diagnostic control case; `SelfTest` only. |
 | `RouteWatchdog.onGaveUp` | Never assigned — after 5 failed rebuilds the route dies **silently**, with no UI. A real gap if a user ever hits it. |
-| `AudioDeviceManager.getDefaultInputDeviceID()`, `isMuted(deviceID:)`, `setMuted(_:deviceID:)`, `getDeviceInfo(deviceID:)` | No input-device UI exists; `getDeviceInfo` is used by the CLI only. |
+| `AudioDeviceManager.isMuted(deviceID:scope:)`, `setMuted(_:deviceID:scope:)` | Device-level mute, in either scope. No UI uses it — per-app mute goes through the IOProc slot instead, and there is no hardware mic-mute button yet. |
