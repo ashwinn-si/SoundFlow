@@ -8,6 +8,7 @@ macOS has never shipped per-application volume. SoundFlow adds it natively,
 using Core Audio process taps on Apple silicon and Intel Macs. No kernel
 extension, no virtual audio driver to install, no login shell hacks.
 
+[![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-3D9E6B)](https://github.com/ashwinn-si/mediaControl/releases)
 [![macOS 15+](https://img.shields.io/badge/macOS-15%2B-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-native%20arm64-0071e3)](https://support.apple.com/en-us/116943)
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://swift.org)
@@ -23,12 +24,18 @@ extension, no virtual audio driver to install, no login shell hacks.
 - **Star your favourites** — starred apps are the only ones shown in the menu
   bar, so the dropdown stays short. Starred apps stay listed even when they are
   not playing.
-- **Rename anything** — double-click a name. "Browser Helper" and
-  `callservicesd` become whatever you want, and the label persists.
+- **Sidebar with counted filters** — All Apps, Starred and Playing, each showing
+  how many, plus devices and settings without leaving the window.
+- **Rename anything** — click the pencil, or double-click a name. "Browser
+  Helper" and `callservicesd` become whatever you want, and the label persists.
+- **Custom app icons** — keep the app's real icon, or give it a generated tile
+  in a colour and letters of your choosing. Automatic colours are derived from
+  the bundle identifier, so an app looks the same every launch.
 - **Output and input device switching** — pick your speakers, headphones or
   microphone, with a level slider for each.
 - **Accent themes** — six presets (System, Ocean, Forest, Sunset, Violet,
-  Graphite) applied across sliders, stars and highlights.
+  Graphite) applied across sliders, stars and highlights, and as a soft
+  background wash in both light and dark mode.
 - **Live level meters** — real RMS from the audio pipeline, not an animation.
 - **Launch at login** and an optional **hidden Dock icon** for a pure menu bar
   app.
@@ -122,9 +129,30 @@ Agent and contributor notes live in **[CLAUDE.md](CLAUDE.md)**; the engine
 internals and the Core Audio gotchas are in
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
+## Release notes
+
+### 1.1.0
+
+- Sidebar navigation with counted All Apps, Starred and Playing filters,
+  replacing the top tab pills.
+- Per-app custom icons: keep the real one, or generate a tile with a chosen
+  colour, style and letters.
+- Edit an app's name and icon together from the new pencil button. The
+  double-click-to-rename shortcut still works.
+- A themed background wash that follows the accent colour.
+- Settings moved into the sidebar; About split into Developer and Version.
+
+### 1.0.0
+
+- Initial release: per-app volume and mute via Core Audio process taps,
+  favourites, renaming, device switching, accent themes and live level meters.
+
 ## Author
 
-Developed by **Ashwin SI** — [github.com/ashwinn-si](https://github.com/ashwinn-si)
+Developed by **Ashwin SI**
+
+- GitHub — [github.com/ashwinn-si](https://github.com/ashwinn-si)
+- LinkedIn — [linkedin.com/in/ashwinsi](https://www.linkedin.com/in/ashwinsi/)
 
 ---
 

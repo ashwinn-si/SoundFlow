@@ -68,13 +68,15 @@ what destroys the live taps.
 | `TapPermission.swift` | TCC state. Screen-capture preflight, **not** tap success. |
 | `Sources/SoundFlowApp/` | The app. |
 | `MixerEngine.swift` | `@MainActor @Observable`. Owns `AppMix` list, prefs, and the route. The only place that decides what gets tapped. |
-| `MixerView.swift` | Root UI. Main window = nav bar + 3 tabs; menu bar (`compact`) = one lean list + footer. Applies the theme tint. |
-| `NavBar.swift` | `MixerTab` enum and the top pill navigation. |
-| `DevicesView.swift` | Devices tab: output/input pickers and their levels. Also owns the shared `LevelSlider`. |
+| `MixerView.swift` | Root UI. Main window = `Sidebar` + content pane; menu bar (`compact`) = one lean list + footer. Applies the theme tint, owns the `AccentWash` background and hosts the single edit sheet. |
+| `Sidebar.swift` | `MixerTab` enum and the left rail: counted filters, devices, the inline settings (theme, startup, reset), and the About rows. |
+| `DevicesView.swift` | Devices pane: output/input pickers and their levels. Also owns the shared `LevelSlider`. |
 | `Theme.swift` | Accent presets, `Themes.all`, and the `\.themeAccent` environment key. |
-| `SettingsView.swift` | Settings **tab** (not a scene): theme swatches, startup, reset, about. |
-| `AppRowView.swift` | One app row: icon, name (double-click to rename), live `LevelMeter`, slider, %, star, mute, context menu. |
-| `Preferences.swift` | `UserDefaults`: volume/mute blob, favourites, custom names, hide-Dock-icon. |
+| `AboutView.swift` | `DeveloperView` (GitHub / LinkedIn link rows) and `VersionView` (version read from the bundle, requirements, what's new). |
+| `AppIcon.swift` | `AppIconStyle`, the bundle-id → hue derivation, and `AppIconView` / `GeneratedIconTile`. |
+| `CustomizeAppSheet.swift` | The pencil's sheet: edits one app's name and icon together. |
+| `AppRowView.swift` | One app row: icon, name (double-click to rename), live `LevelMeter`, slider, %, pencil, star, mute, context menu. |
+| `Preferences.swift` | `UserDefaults`: volume/mute blob, favourites, custom names, icon styles, hide-Dock-icon. |
 | `LaunchAtLogin.swift` | `SMAppService.mainApp` wrapper. No mirrored preference — the service is the source of truth. |
 | `SoundFlowApp.swift` | Scenes, `AppDelegate`, teardown on quit. |
 | `Sources/SoundFlowSpikeMain/` | CLI smoke test + `--selftest`. Not shipped. |
@@ -186,8 +188,9 @@ or a crash — rarely a compile error.
 | Change what appears in the mixer | `MixerEngine.refreshApps()` / `describe(process:bundleID:)` |
 | Change how an app is labelled | `AppMix.displayName` — never read `.name` in the UI |
 | Change row layout, add a per-app control | `AppRowView.swift` |
-| Change window vs menu bar differences | `MixerView.swift` (`compact`), `visibleApps` |
-| Add a persisted setting | `Preferences.swift` + `SettingsView.swift` |
+| Change window vs menu bar differences | `MixerView.swift` (`compact`), `visibleCompactApps` |
+| Add a persisted setting | `Preferences.swift` + `Sidebar.swift` |
+| Change how an app's icon is generated | `AppIcon.swift` (`GeneratedIcon.hues` / `automaticHue`) |
 | Change login-item behaviour | `LaunchAtLogin.swift` — needs a signed bundle to register |
 | Change the volume curve | `MixerIOProc.setVolume(slot:sliderValue:)` — currently squared |
 | Change tap/route lifecycle | `MixerEngine.syncRoute()` — the single decision point |
@@ -197,8 +200,10 @@ or a crash — rarely a compile error.
 Adding a field to `AppPreference` breaks decoding of every saved blob —
 synthesised `Codable` ignores property defaults for missing keys and
 `Preferences.load()` swallows the failure with `try?`, silently resetting all
-volumes. Add a separate `UserDefaults` key instead, as favourites do, or write
-an explicit `init(from:)` using `decodeIfPresent`.
+volumes. Add a separate `UserDefaults` key instead, as favourites, custom names
+and icon styles do. `AppIconStyle` already writes its `init(from:)` by hand with
+`decodeIfPresent`, so that store *can* grow a field safely; `AppPreference`
+cannot.
 
 ## Style
 
