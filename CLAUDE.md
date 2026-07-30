@@ -67,9 +67,10 @@ what destroys the live taps.
 | `TapPermission.swift` | TCC state. Screen-capture preflight, **not** tap success. |
 | `Sources/SoundFlowApp/` | The app. |
 | `MixerEngine.swift` | `@MainActor @Observable`. Owns `AppMix` list, prefs, and the route. The only place that decides what gets tapped. |
-| `MixerView.swift` | Shared UI for the window and the menu bar (`compact` flag). |
+| `MixerView.swift` | Shared UI for the window and the menu bar (`compact` flag). Owns the menu bar footer: Open / Settings / Quit. |
 | `AppRowView.swift` | One app row: icon, name (double-click to rename), slider, %, star, mute, context menu. |
 | `Preferences.swift` | `UserDefaults`: volume/mute blob, favourites, custom names, hide-Dock-icon. |
+| `LaunchAtLogin.swift` | `SMAppService.mainApp` wrapper. No mirrored preference — the service is the source of truth. |
 | `SoundFlowApp.swift` | Scenes, `AppDelegate`, teardown on quit. |
 | `Sources/SoundFlowSpikeMain/` | CLI smoke test + `--selftest`. Not shipped. |
 
@@ -117,10 +118,12 @@ or a crash — rarely a compile error.
    slots off it. The `syncRoute()` membership check compares as an unordered
    set so a re-sort does not tear down a healthy route.
 
-8. **Only `needsTap` decides what is tapped** — `isMuted || volume < 0.999`, and
-   never a DRM-protected app. An app at 100% is never tapped, so it plays
-   natively with no added latency. Starring and renaming are display-only and
-   must never touch the route.
+8. **Only `needsTap` decides what is tapped** —
+   `isActive && !isDRMProtected && (isMuted || volume < 0.999)`. An app at 100%
+   is never tapped, so it plays natively with no added latency. The `isActive`
+   term matters: a starred app that has quit stays in the list as an inactive
+   row with no process object, and tapping it would fail on every sync.
+   Starring and renaming are display-only and must never touch the route.
 
 9. **Sweep orphans at launch.** `TapMaintenance.destroyOrphanedTaps()` and
    `AggregateRoute.destroyOrphanedRoutes()` run in `MixerEngine.start()`; a
@@ -141,6 +144,7 @@ or a crash — rarely a compile error.
 | Change row layout, add a per-app control | `AppRowView.swift` |
 | Change window vs menu bar differences | `MixerView.swift` (`compact`), `visibleApps` |
 | Add a persisted setting | `Preferences.swift` + `SettingsView.swift` |
+| Change login-item behaviour | `LaunchAtLogin.swift` — needs a signed bundle to register |
 | Change the volume curve | `MixerIOProc.setVolume(slot:sliderValue:)` — currently squared |
 | Change tap/route lifecycle | `MixerEngine.syncRoute()` — the single decision point |
 | Debug "no audio" | `MixerIOProc.diagnostics`, then `./scripts/run-spike.sh --selftest` |

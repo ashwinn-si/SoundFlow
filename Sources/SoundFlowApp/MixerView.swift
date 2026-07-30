@@ -1,3 +1,4 @@
+import AppKit
 import CoreAudio
 import SwiftUI
 import SoundFlowCore
@@ -11,6 +12,8 @@ struct MixerView: View {
     /// Trimmed layout for the menu bar popover.
     var compact = false
 
+    @Environment(\.openWindow) private var openWindow
+
     var body: some View {
         VStack(spacing: 0) {
             if engine.permission == .denied {
@@ -19,6 +22,13 @@ struct MixerView: View {
                 header
                 Divider()
                 appList
+            }
+
+            // The menu bar is the only way back to the app when the Dock icon
+            // is hidden, so it carries the window and quit actions.
+            if compact {
+                Divider()
+                footer
             }
         }
         .frame(minWidth: compact ? 300 : 380,
@@ -90,6 +100,42 @@ struct MixerView: View {
                 }
             }
         )
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            Button("Open SoundFlow") {
+                openWindow(id: "main")
+                // Needed in .accessory mode, where opening a window does not
+                // bring the app forward on its own.
+                NSApp.activate()
+            }
+            .buttonStyle(.link)
+
+            Spacer(minLength: 0)
+
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(.borderless)
+            .help("Settings")
+
+            Button {
+                // Routes through applicationWillTerminate, which destroys every
+                // tap. Anything less leaves apps muted.
+                NSApp.terminate(nil)
+            } label: {
+                Image(systemName: "power")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(.borderless)
+            .help("Quit SoundFlow")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Apps

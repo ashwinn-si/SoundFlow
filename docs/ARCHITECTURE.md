@@ -241,7 +241,8 @@ XPC helpers out of the list.
 | Field | Notes |
 | :--- | :--- |
 | `volume`, `isMuted` | Persisted. Drive `needsTap`. |
-| `needsTap` | `!isDRMProtected && (isMuted \|\| volume < 0.999)` |
+| `needsTap` | `isActive && !isDRMProtected && (isMuted \|\| volume < 0.999)` |
+| `isActive` | `false` for a starred app with no live CoreAudio process. No process object, so it can never be tapped. |
 | `isPlaying` | From the HAL's `IsRunningOutput`. Affects sort only. |
 | `level` | Live meter, written every 0.08 s. |
 | `isDRMProtected` | Set by tap failure. Disables the controls. |
@@ -265,6 +266,21 @@ without hopping to the main actor.
   Blank input, or input equal to the system name, clears the override rather
   than storing a duplicate. The system name stays in the tooltip so a renamed
   row can still be traced back to its process.
+- **Starred apps persist through quitting.** `refreshApps()` appends an
+  inactive row for every favourite missing from the HAL snapshot, so a
+  favourite never disappears from the menu just because it stopped playing.
+  Name and icon come from the installed bundle via `describeBundle(_:)`; a
+  renamed app still gets a row even if the bundle cannot be found, since the
+  user chose that label deliberately. Inactive rows read "Not running", are
+  dimmed to 65%, and keep working controls — the level is saved and applies the
+  next time the app produces audio. Unstarring an inactive row removes it
+  outright, since nothing is left to show.
+- The menu bar popover has a footer (`compact` only) with **Open SoundFlow**,
+  **Settings**, and **Quit**. It renders even when permission is denied — with
+  the Dock icon hidden, this is the only route back into the app, and Quit is
+  the only thing that runs `applicationWillTerminate` and destroys the taps.
+  `openWindow(id: "main")` is followed by `NSApp.activate()`, which is required
+  in `.accessory` mode.
 
 ### Persistence
 
@@ -277,6 +293,14 @@ the app and restarting SoundFlow.
 | `SoundFlow.favoriteApps` | `[String]` | nothing |
 | `SoundFlow.customNames` | `[String: String]` | nothing (per-app, via context menu) |
 | `SoundFlow.hideDockIcon` | `Bool` | nothing |
+
+Launch-at-login is deliberately **not** in this table. `SMAppService.mainApp` is
+its own source of truth; a mirrored `UserDefaults` flag would drift the moment
+the user toggles the item in System Settings → General → Login Items. The
+toggle in `SettingsView` re-reads the real status on appear, and reverts itself
+if registration throws — which it will for an unsigned or quarantined bundle.
+`status == .requiresApproval` means the user disabled it in System Settings and
+is reported honestly as off.
 
 > **Do not add fields to `AppPreference`.** Swift's synthesised `Codable`
 > ignores property defaults for missing keys, so a new field makes every

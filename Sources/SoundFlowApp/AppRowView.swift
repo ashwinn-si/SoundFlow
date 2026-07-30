@@ -35,7 +35,7 @@ struct AppRowView: View {
 
                     Spacer(minLength: 0)
 
-                    Text(app.isDRMProtected ? "Protected" : "\(Int(app.volume * 100))%")
+                    Text(statusText)
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
 
@@ -69,10 +69,8 @@ struct AppRowView: View {
             }
         }
         .padding(.vertical, 4)
-        .opacity(app.isDRMProtected ? 0.5 : 1)
-        .help(app.isDRMProtected
-              ? "macOS does not allow volume control for DRM-protected audio."
-              : "")
+        .opacity(app.isDRMProtected ? 0.5 : (app.isActive ? 1 : 0.65))
+        .help(rowHelp)
         .contextMenu {
             Button("Rename…") { beginRename() }
             if app.customName != nil {
@@ -83,6 +81,25 @@ struct AppRowView: View {
                 engine.toggleFavorite(app)
             }
         }
+    }
+
+    // MARK: - Status
+
+    private var statusText: String {
+        if app.isDRMProtected { return "Protected" }
+        if !app.isActive { return "Not running" }
+        return "\(Int(app.volume * 100))%"
+    }
+
+    private var rowHelp: String {
+        if app.isDRMProtected {
+            return "macOS does not allow volume control for DRM-protected audio."
+        }
+        if !app.isActive {
+            return "Starred, but not playing audio right now. "
+                 + "This level applies the next time it does."
+        }
+        return ""
     }
 
     // MARK: - Name

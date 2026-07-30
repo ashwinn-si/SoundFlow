@@ -28,6 +28,13 @@ final class AppMix {
     var volume: Float = 1.0
     var isMuted: Bool = false
 
+    /// `true` while CoreAudio still has a live process for this app.
+    ///
+    /// A starred app that has quit stays in the list as an inactive row so the
+    /// user can see and unstar it. It has no process object, so it can never be
+    /// tapped — hence the `isActive` term in `needsTap`.
+    var isActive: Bool = true
+
     /// `true` while the process has an active output stream.
     var isPlaying: Bool = false
     /// Live meter level.
@@ -40,7 +47,7 @@ final class AppMix {
     var isFavorite: Bool = false
 
     /// Whether this app currently needs to be routed through the mixer.
-    var needsTap: Bool { !isDRMProtected && (isMuted || volume < 0.999) }
+    var needsTap: Bool { isActive && !isDRMProtected && (isMuted || volume < 0.999) }
 
     init(bundleID: String, pid: pid_t, processObjectID: AudioObjectID,
          name: String, icon: NSImage?) {
@@ -55,6 +62,18 @@ final class AppMix {
         self.pid = pid
         self.processObjectID = processObjectID
         self.isPlaying = isPlaying
+        self.isActive = true
+    }
+
+    /// The process is gone, but the row stays because the app is starred.
+    func markInactive() {
+        pid = 0
+        processObjectID = AudioObjectID(kAudioObjectUnknown)
+        isActive = false
+        isPlaying = false
+        level = 0
+        // A future launch may not be DRM-protected; re-test rather than inherit.
+        isDRMProtected = false
     }
 }
 
@@ -241,9 +260,47 @@ final class MixerEngine {
             }
         }
 
+        // Starred apps that are not currently producing audio stay in the list
+        // as inactive rows. Without this a favourite vanishes the moment it
+        // stops playing, which makes the menu bar look broken.
+        for bundleID in favorites where !seen.contains(bundleID) {
+            let existing = apps.first { $0.bundleID == bundleID }
+            if let existing {
+                existing.markInactive()
+                updated.append(existing)
+                continue
+            }
+            guard let placeholder = makeInactiveFavorite(bundleID: bundleID) else { continue }
+            updated.append(placeholder)
+        }
+
         apps = sortApps(updated)
 
         syncRoute()
+    }
+
+    /// Builds a row for a starred app that has no live audio process.
+    ///
+    /// The name and icon come from the installed bundle. A renamed app still
+    /// gets a row even if the bundle cannot be found, since the user chose that
+    /// label deliberately; anything else unresolvable is skipped.
+    private func makeInactiveFavorite(bundleID: String) -> AppMix? {
+        let descriptor = describeBundle(bundleID)
+        guard descriptor != nil || customNames[bundleID] != nil else { return nil }
+
+        let mix = AppMix(bundleID: bundleID,
+                         pid: 0,
+                         processObjectID: AudioObjectID(kAudioObjectUnknown),
+                         name: descriptor?.name ?? bundleID,
+                         icon: descriptor?.icon)
+        let saved = preferences[bundleID] ?? .default
+        mix.volume = saved.volume
+        mix.isMuted = saved.isMuted
+        mix.customName = customNames[bundleID]
+        mix.isFavorite = true
+        mix.isActive = false
+        mix.isPlaying = false
+        return mix
     }
 
     /// Starred first, then whatever is currently playing, then by name.
@@ -266,12 +323,16 @@ final class MixerEngine {
         }
         // Helper processes (e.g. browser audio helpers) report the parent app's
         // bundle id, so fall back to looking the bundle up on disk.
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            let name = FileManager.default.displayName(atPath: url.path)
-                .replacingOccurrences(of: ".app", with: "")
-            return (name, NSWorkspace.shared.icon(forFile: url.path))
-        }
-        return nil
+        return describeBundle(bundleID)
+    }
+
+    /// Name and icon for an installed bundle, with no running process required.
+    private func describeBundle(_ bundleID: String) -> (name: String, icon: NSImage?)? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        else { return nil }
+        let name = FileManager.default.displayName(atPath: url.path)
+            .replacingOccurrences(of: ".app", with: "")
+        return (name, NSWorkspace.shared.icon(forFile: url.path))
     }
 
     // MARK: - Volume
@@ -347,7 +408,13 @@ final class MixerEngine {
             favorites.remove(app.bundleID)
         }
         Preferences.saveFavorites(favorites)
-        apps = sortApps(apps)
+
+        // An unstarred row with no live process has nothing left to show.
+        if !app.isFavorite && !app.isActive {
+            apps.removeAll { $0 === app }
+        } else {
+            apps = sortApps(apps)
+        }
     }
 
     // MARK: - Route management

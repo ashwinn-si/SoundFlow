@@ -57,7 +57,9 @@ let package = Package(
                 .linkedFramework("AudioToolbox"),
                 .linkedFramework("CoreFoundation"),
                 .linkedFramework("AppKit"),
-                .linkedFramework("SwiftUI")
+                .linkedFramework("SwiftUI"),
+                // SMAppService, for the launch-at-login toggle.
+                .linkedFramework("ServiceManagement")
             ]
         )
     ]
