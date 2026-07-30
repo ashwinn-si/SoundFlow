@@ -2,29 +2,37 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDisplayName</key>
-	<string>SoundFlow</string>
-	<key>CFBundleExecutable</key>
-	<string>SoundFlowApp</string>
-	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
-	<key>CFBundleIconName</key>
-	<string>AppIcon</string>
-	<key>CFBundleIdentifier</key>
-	<string>com.soundflow.app</string>
-	<key>CFBundleName</key>
-	<string>SoundFlow</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.1.1</string>
-	<key>CFBundleVersion</key>
-	<string>3</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>15.0</string>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>SoundFlow uses System Audio Capture to provide per-application volume control. Your audio is processed locally and never recorded or transmitted.</string>
-	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
+    <!-- App Identity -->
+    <key>CFBundleExecutable</key>
+    <string>SoundFlowApp</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.soundflow.app</string>
+    <key>CFBundleName</key>
+    <string>SoundFlow</string>
+    <key>CFBundleDisplayName</key>
+    <string>SoundFlow</string>
+    <key>CFBundleVersion</key>
+    <string>3</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.1.1</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+
+    <!-- Regular app: main window + Dock icon, plus a MenuBarExtra companion.
+         The Dock icon can be hidden at runtime from the sidebar. -->
+
+    <!-- TCC: Screen & System Audio Recording (required for CATap / ProcessTap) -->
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>SoundFlow uses System Audio Capture to provide per-application volume control. Your audio is processed locally and never recorded or transmitted.</string>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
 </dict>
 </plist>
