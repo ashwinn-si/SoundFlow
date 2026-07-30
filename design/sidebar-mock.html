@@ -1,0 +1,1291 @@
+<!doctype html>
+<html lang="en" data-mode="dark" data-theme="sunset" data-surfaces="both">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoundFlow — sidebar</title>
+<style>
+/* ==========================================================================
+   0. Page shell
+   Deliberately un-washed: the mock is the thing being judged, and a tinted
+   page would contaminate the comparison.
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --font: -apple-system, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* Space-separated, not comma-separated: `rgb(r,g,b / a)` mixes legacy commas
+     with modern slash alpha and is invalid, which silently drops every
+     declaration that composes an alpha off these. */
+  --accent-rgb: 237 112 82;
+  --accent: rgb(var(--accent-rgb));
+  --danger: 255 91 82;
+}
+
+html[data-mode="dark"] {
+  --page: #131211;
+  --page-fg: #ebe9e7;
+  --page-fg-2: rgb(235 233 231 / .55);
+  --page-line: rgb(255 255 255 / .09);
+  --page-card: rgb(255 255 255 / .04);
+
+  /* --- the mock's own palette -------------------------------------------- */
+  --base: #181716;          /* warm-neutral, not pure grey */
+  --fg-rgb: 255 255 255;
+  --text:   rgb(255 255 255 / .92);
+  --text-2: rgb(255 255 255 / .56);
+  --text-3: rgb(255 255 255 / .33);
+  --sep:    rgb(255 255 255 / .08);
+  --hairline: rgb(255 255 255 / .07);
+  --fill-1: rgb(255 255 255 / .05);
+  --fill-2: rgb(255 255 255 / .09);
+  --track:  rgb(255 255 255 / .16);
+  --knob:   #e6e4e2;
+  --shadow: 0 22px 52px rgb(0 0 0 / .58), 0 2px 8px rgb(0 0 0 / .42);
+
+  /* A single stop collapses too fast and reads as a smudge. The mid stop is
+     what turns it into a wash. */
+  --wash-1:  26%;           /* hottest, at the corner */
+  --wash-1m:  9%;           /* mid stop */
+  --wash-2:   7%;           /* bottom-right counter-light */
+  --card-wash: 6%;
+  --card-edge: 14%;
+  --rail-dim: rgb(0 0 0 / .16);
+}
+
+html[data-mode="light"] {
+  --page: #dedcd8;
+  --page-fg: #201f1d;
+  --page-fg-2: rgb(32 31 29 / .58);
+  --page-line: rgb(0 0 0 / .12);
+  --page-card: rgb(255 255 255 / .5);
+
+  --base: #f3f2f0;
+  --fg-rgb: 0 0 0;
+  --text:   rgb(0 0 0 / .88);
+  --text-2: rgb(0 0 0 / .56);
+  --text-3: rgb(0 0 0 / .35);
+  --sep:    rgb(0 0 0 / .09);
+  --hairline: rgb(0 0 0 / .08);
+  --fill-1: rgb(0 0 0 / .04);
+  --fill-2: rgb(0 0 0 / .07);
+  --track:  rgb(0 0 0 / .13);
+  --knob:   #ffffff;
+  --shadow: 0 20px 44px rgb(0 0 0 / .22), 0 2px 6px rgb(0 0 0 / .12);
+
+  /* 26% on white is a stain, not a wash. */
+  --wash-1:  15%;
+  --wash-1m: 5.5%;
+  --wash-2:  4%;
+  --card-wash: 5%;
+  --card-edge: 17%;
+  --rail-dim: rgb(0 0 0 / .035);
+}
+
+body {
+  margin: 0; padding: 0 0 90px;
+  background: var(--page); color: var(--page-fg);
+  font: 13px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- sticky control bar --------------------------------------------------- */
+
+.bar {
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  padding: 12px 22px;
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(20px) saturate(160%);
+  border-bottom: 1px solid var(--page-line);
+}
+.bar__title { font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+.bar__title span { color: var(--page-fg-2); font-weight: 400; }
+.bar__group { display: flex; align-items: center; gap: 8px; }
+.bar__label {
+  font: 600 10px var(--font); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--page-fg-2);
+}
+.swatches { display: flex; gap: 7px; }
+.swatch {
+  width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
+  cursor: pointer; position: relative; display: grid; place-items: center;
+  transition: transform .14s ease;
+}
+.swatch:hover { transform: scale(1.08); }
+.swatch[aria-pressed="true"]::after {
+  content: ""; position: absolute; inset: -4px;
+  border: 2px solid var(--page-fg); border-radius: 50%; opacity: .85;
+}
+.swatch svg { width: 10px; height: 10px; fill: rgb(255 255 255 / .9); }
+
+.seg {
+  display: flex; padding: 2px; gap: 2px; border-radius: 8px;
+  background: var(--page-card); border: 1px solid var(--page-line);
+}
+.seg button {
+  border: 0; background: transparent; cursor: pointer;
+  font: 500 11.5px var(--font); color: var(--page-fg-2);
+  padding: 4px 11px; border-radius: 6px;
+}
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+main { padding: 40px 22px 0; }
+.stage { display: flex; gap: 30px; align-items: flex-start; flex-wrap: wrap; }
+.stage__item { display: flex; flex-direction: column; gap: 9px; }
+.stage__cap {
+  font: 600 10px var(--font); letter-spacing: .07em;
+  text-transform: uppercase; color: var(--page-fg-2);
+}
+html[data-surfaces="window"]  .stage__item--menu,
+html[data-surfaces="menubar"] .stage__item--window { display: none; }
+
+.note {
+  max-width: 62ch; margin: 34px 0 0;
+  color: var(--page-fg-2); font-size: 12.5px; line-height: 1.65;
+}
+.note b { color: var(--page-fg); font-weight: 600; }
+.note code {
+  font: 11.5px var(--mono); background: var(--page-card);
+  padding: 1px 5px; border-radius: 4px;
+}
+
+/* ==========================================================================
+   1. Mock chrome — the wash, defined exactly once
+   ========================================================================== */
+
+.mock {
+  position: relative; overflow: hidden;
+  color: var(--text); font: 13px/1.4 var(--font);
+  border-radius: 12px; box-shadow: var(--shadow);
+  border: 1px solid var(--hairline);
+  display: flex; flex-direction: column;
+  background:
+    radial-gradient(122% 92% at -4% -8%,
+      rgb(var(--accent-rgb) / var(--wash-1))  0%,
+      rgb(var(--accent-rgb) / var(--wash-1m)) 36%,
+      transparent 70%),
+    radial-gradient(102% 84% at 104% 106%,
+      rgb(var(--accent-rgb) / var(--wash-2)) 0%, transparent 62%),
+    var(--base);
+}
+.mock--window { width: 560px; height: 440px; }
+.mock--menu   { width: 320px; }
+
+.titlebar {
+  display: flex; align-items: center; gap: 12px;
+  height: 32px; padding: 0 12px; flex: 0 0 auto;
+}
+.lights { display: flex; gap: 8px; }
+.lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+.titlebar .iconbtn { margin-left: 4px; }
+
+.sep { height: 1px; background: var(--sep); flex: 0 0 auto; }
+.scroll { overflow-y: auto; overscroll-behavior: contain; }
+.scroll::-webkit-scrollbar { width: 8px; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--fg-rgb) / .2); border-radius: 4px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+
+/* ==========================================================================
+   2. Controls — native metrics, accent for state only
+   ========================================================================== */
+
+.glyph { width: 1em; height: 1em; fill: currentColor; flex: 0 0 auto; display: block; }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 15px; background: transparent; margin: 0;
+  cursor: pointer; flex: 1 1 auto; min-width: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(to right,
+    var(--accent) 0 var(--fill, 50%), var(--track) var(--fill, 50%) 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; border-radius: 50%; margin-top: -5.5px;
+  background: var(--knob); border: .5px solid rgb(0 0 0 / .2);
+  box-shadow: 0 1px 2.5px rgb(0 0 0 / .35);
+}
+
+.pct {
+  font: 11px/1 var(--mono); color: var(--text-2);
+  font-variant-numeric: tabular-nums; flex: 0 0 auto; text-align: right;
+}
+.iconbtn {
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+  color: var(--text-2); display: grid; place-items: center;
+  width: 18px; height: 18px; flex: 0 0 auto; font-size: 13px;
+}
+.iconbtn:hover { color: var(--text); }
+.iconbtn[data-on="true"] { color: var(--accent); }
+
+.picker {
+  display: flex; align-items: center; gap: 6px;
+  height: 21px; padding: 0 6px 0 8px; border-radius: 6px;
+  background: var(--fill-2); border: 1px solid var(--hairline);
+  font-size: 11.5px; color: var(--text); cursor: pointer; max-width: 100%;
+}
+.picker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker .glyph { font-size: 10px; color: var(--text-2); margin-left: auto; }
+
+.btn {
+  border: 1px solid var(--hairline); background: var(--fill-2);
+  color: var(--text); border-radius: 6px; padding: 4px 12px;
+  font: 12px var(--font); cursor: pointer;
+}
+.btn--primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 500; }
+
+/* --- generated app tile --------------------------------------------------- */
+.tile {
+  border-radius: 7px; flex: 0 0 auto; cursor: pointer;
+  display: grid; place-items: center; border: 0; padding: 0;
+  font: 700 12px var(--font); color: #fff; letter-spacing: -.02em;
+  text-shadow: 0 1px 2px rgb(0 0 0 / .32);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .24), 0 1px 2px rgb(0 0 0 / .28);
+  width: 28px; height: 28px;
+  transition: transform .12s ease;
+}
+.tile:hover { transform: scale(1.07); }
+.tile--lg { width: 56px; height: 56px; border-radius: 13px; font-size: 23px; cursor: default; }
+.tile--lg:hover { transform: none; }
+/* Real app icons bring their own shape and shading — the generated tile's
+   inset highlight would sit on top of them and read as a bug. */
+.tile--logo { box-shadow: none; overflow: hidden; }
+.tile--logo svg { width: 100%; height: 100%; display: block; }
+
+/* --- live level meter ----------------------------------------------------- */
+.meter { display: flex; align-items: flex-end; gap: 1.5px; height: 10px; flex: 0 0 auto; }
+.meter i {
+  width: 2px; border-radius: 1px; background: var(--accent); display: block;
+  transform-origin: bottom; animation: bounce 1s ease-in-out infinite alternate;
+}
+.meter i:nth-child(1) { height: 6px;  animation-duration: .78s; }
+.meter i:nth-child(2) { height: 10px; animation-duration: .55s; }
+.meter i:nth-child(3) { height: 8px;  animation-duration: .95s; }
+@keyframes bounce { from { transform: scaleY(.22); } to { transform: scaleY(1); } }
+
+/* ==========================================================================
+   3. The rail
+   No background colour of its own — a neutral dim plus a hairline, so it
+   separates without interrupting the bloom.
+   ========================================================================== */
+
+.split { display: flex; flex: 1 1 auto; min-height: 0; }
+
+.rail {
+  width: 158px; flex: 0 0 auto; padding: 0 8px 10px;
+  border-right: 1px solid var(--sep);
+  background: var(--rail-dim);
+  display: flex; flex-direction: column;
+}
+.rail__label {
+  font: 600 10px var(--font); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-3); padding: 12px 8px 5px;
+}
+.rail__label:first-child { padding-top: 4px; }
+
+.rail button.nav {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 5px 8px; border-radius: 7px; margin-bottom: 1px;
+  font: 500 12.5px var(--font); color: var(--text-2); text-align: left;
+}
+.rail button.nav .glyph { font-size: 12px; }
+.rail button.nav > span {
+  flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rail button.nav b {
+  font: 600 10.5px var(--mono); color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.rail button.nav:hover { background: var(--fill-1); }
+.rail button.nav[aria-pressed="true"] {
+  background: rgb(var(--accent-rgb) / .16); color: var(--accent);
+}
+.rail button.nav[aria-pressed="true"] b { color: var(--accent); }
+
+/* Inline controls, the way MultiClips puts checkboxes under Settings. */
+.rail__inline {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px; font-size: 12px; color: var(--text-2);
+}
+.rail__inline > span { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.check {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 4px 8px; border-radius: 6px;
+  font: 12px var(--font); color: var(--text-2); text-align: left;
+}
+.check:hover { background: var(--fill-1); }
+.check i {
+  width: 14px; height: 14px; border-radius: 4px; flex: 0 0 auto;
+  border: 1px solid var(--track); display: grid; place-items: center;
+}
+.check[aria-pressed="true"] { color: var(--text); }
+.check[aria-pressed="true"] i { background: var(--accent); border-color: transparent; }
+.check i svg { width: 9px; height: 9px; fill: none; stroke: #fff; stroke-width: 2.2; opacity: 0; }
+.check[aria-pressed="true"] i svg { opacity: 1; }
+.check > span { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Destructive row, like MultiClips' Clear History. */
+.rail button.danger {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 1px solid rgb(var(--danger) / .28); border-radius: 7px;
+  background: rgb(var(--danger) / .1); cursor: pointer;
+  padding: 5px 8px; margin-top: 4px;
+  font: 500 12px var(--font); color: rgb(var(--danger)); text-align: left;
+}
+.rail button.danger:hover { background: rgb(var(--danger) / .18); }
+.rail button.danger .glyph { font-size: 12px; }
+html[data-mode="light"] { --danger: 209 47 40; }
+
+/* ==========================================================================
+   4. Content
+   ========================================================================== */
+
+.content { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.content__head {
+  display: flex; align-items: baseline; gap: 9px;
+  padding: 10px 15px 6px; flex: 0 0 auto;
+}
+.content__head h3 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.025em; }
+.content__head .sub { font-size: 11.5px; color: var(--text-3); }
+
+.pane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.pane[hidden] { display: none; }
+
+.list { padding: 2px 9px 10px; flex: 1 1 auto; }
+.row { display: flex; gap: 12px; padding: 6px 6px; border-radius: 8px; }
+.row:hover { background: var(--fill-1); }
+.row[data-state="protected"] { opacity: .5; }
+.row[data-state="inactive"]  { opacity: .65; }
+.row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.row__top { display: flex; align-items: center; gap: 6px; }
+.row__top .pct { margin-left: auto; }
+.row__bottom { display: flex; align-items: center; gap: 8px; }
+.name {
+  font-size: 13px; font-weight: 500; letter-spacing: -.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+
+.empty {
+  display: grid; place-items: center; gap: 7px; text-align: center;
+  padding: 60px 30px; color: var(--text-2);
+}
+.empty .glyph { font-size: 26px; color: var(--text-3); }
+.empty b { font-size: 13px; font-weight: 600; color: var(--text); }
+.empty span { font-size: 11.5px; color: var(--text-3); max-width: 30ch; }
+
+.card {
+  border-radius: 10px; padding: 12px;
+  background:
+    linear-gradient(rgb(var(--accent-rgb) / var(--card-wash)) 0 100%), var(--fill-1);
+  border: 1px solid rgb(var(--accent-rgb) / var(--card-edge));
+}
+.card__head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 10px;
+  font: 600 10.5px var(--font); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-2);
+}
+.card__head .glyph { font-size: 11px; }
+.caption { font-size: 11px; color: var(--text-3); line-height: 1.5; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.levelslider { display: flex; align-items: center; gap: 8px; }
+.levelslider > .glyph { font-size: 10px; color: var(--text-2); width: 14px; }
+.levelslider .pct { width: 34px; }
+.link { color: var(--accent); display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; text-decoration: none; }
+
+/* ==========================================================================
+   5. Icon customization sheet
+   ========================================================================== */
+
+.sheetwrap {
+  position: absolute; inset: 0; z-index: 20;
+  display: grid; place-items: center;
+  background: rgb(0 0 0 / .42); backdrop-filter: blur(1.5px);
+}
+html[data-mode="light"] .sheetwrap { background: rgb(0 0 0 / .22); }
+.sheetwrap[hidden] { display: none; }
+
+/* 400 wide so the thirteen colour chips fit on one line — at 320 they wrapped
+   to a second row and pushed Cancel/Done off the bottom of a 440pt window. */
+.sheet {
+  width: 400px; border-radius: 13px; padding: 14px;
+  border: 1px solid var(--hairline);
+  box-shadow: 0 20px 48px rgb(0 0 0 / .5);
+  background:
+    radial-gradient(120% 110% at 0% 0%,
+      rgb(var(--accent-rgb) / 16%) 0%, transparent 62%),
+    var(--base);
+  display: flex; flex-direction: column; gap: 11px;
+}
+.sheet__head { display: flex; align-items: center; gap: 13px; }
+.sheet__head h4 { margin: 0 0 2px; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+.sheet__head p { margin: 0; font-size: 11px; color: var(--text-3); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field__label {
+  font: 600 10px var(--font); letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.styleseg { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--fill-2); }
+.styleseg button {
+  flex: 1; border: 0; background: transparent; cursor: pointer;
+  padding: 5px 0; border-radius: 6px;
+  font: 500 12px var(--font); color: var(--text-2);
+}
+.styleseg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+.hues { display: flex; flex-wrap: wrap; gap: 6px; }
+.hue {
+  width: 22px; height: 22px; border-radius: 6px; border: 0; padding: 0;
+  cursor: pointer; position: relative;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .22);
+}
+.hue[aria-pressed="true"]::after {
+  content: ""; position: absolute; inset: -3px;
+  border: 2px solid var(--text); border-radius: 9px; opacity: .85;
+}
+.hue--auto {
+  display: grid; place-items: center; color: var(--text-2);
+  background: var(--fill-2); box-shadow: none; font-size: 11px;
+}
+.hue--auto[aria-pressed="true"] { color: var(--accent); }
+
+.textfield {
+  width: 70px; height: 22px; border-radius: 6px; padding: 0 8px;
+  background: var(--fill-2); border: 1px solid var(--hairline);
+  color: var(--text); font: 12px var(--font);
+}
+.textfield--wide { width: 100%; height: 24px; font-size: 12.5px; }
+.textfield:focus { outline: 2px solid rgb(var(--accent-rgb) / .5); outline-offset: -1px; }
+.textfield:disabled, .styleseg button:disabled, .hue:disabled { opacity: .4; cursor: default; }
+/* Inert rather than hidden: hiding these would make the sheet jump height
+   every time the Icon segment is toggled. */
+[data-generated][aria-disabled="true"] .field__label { opacity: .5; }
+.sheet__foot { display: flex; align-items: center; gap: 8px; }
+.sheet__foot .btn:last-child { margin-left: 0; }
+.sheet__foot .spacer { flex: 1 1 auto; }
+
+/* ==========================================================================
+   6. Menu bar popover — the rail cannot fit at 320pt
+   ========================================================================== */
+
+.menuhead { padding: 11px 14px; display: flex; flex-direction: column; gap: 10px; }
+.menuhead__top { display: flex; align-items: center; gap: 8px; }
+.menuhead__top > span { font-size: 11px; color: var(--text-2); }
+.footer { display: flex; align-items: center; gap: 10px; padding: 9px 14px; flex: 0 0 auto; }
+.footer button {
+  border: 0; background: transparent; cursor: pointer; padding: 0;
+  color: var(--accent); font: 500 12px var(--font);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+</style>
+</head>
+<body>
+
+<!-- SF Symbols do not exist in a browser. These approximate the glyphs the app
+     actually uses, at the same optical weight. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-spk" viewBox="0 0 16 16">
+    <path d="M8.3 2.2 4.7 5.1H2.6a.9.9 0 0 0-.9.9v4c0 .5.4.9.9.9h2.1l3.6 2.9c.55.44 1.2.05 1.2-.55V2.75c0-.6-.65-.99-1.2-.55Z"/>
+  </symbol>
+  <symbol id="i-spk1" viewBox="0 0 16 16">
+    <path d="M8.3 2.2 4.7 5.1H2.6a.9.9 0 0 0-.9.9v4c0 .5.4.9.9.9h2.1l3.6 2.9c.55.44 1.2.05 1.2-.55V2.75c0-.6-.65-.99-1.2-.55Z"/>
+    <path d="M11.3 5.9a3.3 3.3 0 0 1 0 4.2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-spk2" viewBox="0 0 16 16">
+    <path d="M8.3 2.2 4.7 5.1H2.6a.9.9 0 0 0-.9.9v4c0 .5.4.9.9.9h2.1l3.6 2.9c.55.44 1.2.05 1.2-.55V2.75c0-.6-.65-.99-1.2-.55Z"/>
+    <path d="M11.3 5.9a3.3 3.3 0 0 1 0 4.2M13.5 3.9a6.2 6.2 0 0 1 0 8.2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-spkoff" viewBox="0 0 16 16">
+    <path d="M8.3 2.2 4.7 5.1H2.6a.9.9 0 0 0-.9.9v4c0 .5.4.9.9.9h2.1l3.6 2.9c.55.44 1.2.05 1.2-.55V2.75c0-.6-.65-.99-1.2-.55Z"/>
+    <path d="m11.1 5.9 3.6 4.2M14.7 5.9l-3.6 4.2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-mic" viewBox="0 0 16 16">
+    <path d="M8 1.4a2.2 2.2 0 0 0-2.2 2.2v4.2a2.2 2.2 0 0 0 4.4 0V3.6A2.2 2.2 0 0 0 8 1.4Z"/>
+    <path d="M3.7 7.4v.5a4.3 4.3 0 0 0 8.6 0v-.5M8 12.3v2.2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-micoff" viewBox="0 0 16 16">
+    <path d="M3.7 7.4v.5a4.3 4.3 0 0 0 8.6 0v-.5M8 12.3v2.2M2 2l12 12" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+    <path d="M8 1.4a2.2 2.2 0 0 0-2.2 2.2v4.2a2.2 2.2 0 0 0 4.4 0V3.6A2.2 2.2 0 0 0 8 1.4Z" opacity=".5"/>
+  </symbol>
+  <symbol id="i-star" viewBox="0 0 16 16">
+    <path d="M8 1.7 9.9 5.6l4.3.6-3.1 3 .74 4.3L8 11.5l-3.84 2 .74-4.3-3.1-3 4.3-.6z"
+      fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-starf" viewBox="0 0 16 16">
+    <path d="M8 1.7 9.9 5.6l4.3.6-3.1 3 .74 4.3L8 11.5l-3.84 2 .74-4.3-3.1-3 4.3-.6z"/>
+  </symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16">
+    <path fill-rule="evenodd" d="M6.85.9h2.3l.3 1.72 1.13.47L12 2.06l1.94 1.94-1.03 1.42.47 1.13 1.72.3v2.3l-1.72.3-.47 1.13L13.94 12 12 13.94l-1.42-1.03-1.13.47-.3 1.72h-2.3l-.3-1.72-1.13-.47L4 13.94 2.06 12l1.03-1.42-.47-1.13-1.72-.3v-2.3l1.72-.3.47-1.13L2.06 4 4 2.06l1.42 1.03 1.13-.47ZM8 5.85A2.15 2.15 0 1 0 8 10.15 2.15 2.15 0 0 0 8 5.85Z"/>
+  </symbol>
+  <symbol id="i-sliders" viewBox="0 0 16 16">
+    <path d="M3.9 1.8v3.3M3.9 8.6v5.6M8 1.8v6.4M8 11.7v2.5M12.1 1.8v1.5M12.1 6.8v7.4"
+      fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/>
+    <circle cx="3.9" cy="6.85" r="1.65"/><circle cx="8" cy="9.95" r="1.65"/><circle cx="12.1" cy="5.05" r="1.65"/>
+  </symbol>
+  <symbol id="i-wave" viewBox="0 0 16 16">
+    <path d="M2 7v2M5 4.4v7.2M8 2.2v11.6M11 4.9v6.2M14 6.6v2.8"
+      fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-speaker-dev" viewBox="0 0 16 16">
+    <rect x="3.4" y="1.5" width="9.2" height="13" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <circle cx="8" cy="9.6" r="2.3"/><circle cx="8" cy="4.7" r="1"/>
+  </symbol>
+  <symbol id="i-power" viewBox="0 0 16 16">
+    <path d="M8 1.7v6.1M4.55 3.9a5.15 5.15 0 1 0 6.9 0"
+      fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-updown" viewBox="0 0 16 16">
+    <path d="m4.9 6.5 3.1-3 3.1 3M4.9 9.5l3.1 3 3.1-3"
+      fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-palette" viewBox="0 0 16 16">
+    <path d="M8 1.5C4.1 1.5 1 4.4 1 8c0 3.5 3 5.7 5.6 5.7 1.3 0 1.9-.6 1.9-1.4 0-.5-.3-.8-.3-1.3 0-.6.5-1 1.2-1H11c2.3 0 4-1.6 4-3.9C15 3.2 12 1.5 8 1.5Z"
+      fill="none" stroke="currentColor" stroke-width="1.25"/>
+    <circle cx="4.5" cy="6.6" r=".95"/><circle cx="7.1" cy="4.6" r=".95"/>
+    <circle cx="10.3" cy="5.3" r=".95"/><circle cx="11.9" cy="8" r=".95"/>
+  </symbol>
+  <symbol id="i-reset" viewBox="0 0 16 16">
+    <path d="M2.4 8a5.6 5.6 0 1 0 1.75-4.05" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/>
+    <path d="M1.6 2.3v3.5h3.5" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-person" viewBox="0 0 16 16">
+    <circle cx="8" cy="5" r="2.9" fill="none" stroke="currentColor" stroke-width="1.35"/>
+    <path d="M2.4 14.2a5.6 5.6 0 0 1 11.2 0" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-tag" viewBox="0 0 16 16">
+    <path d="M2 2h5.4l6.6 6.6-5.4 5.4L2 7.4V2Z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/>
+    <circle cx="5" cy="5" r="1.15"/>
+  </symbol>
+  <symbol id="i-sparkle" viewBox="0 0 16 16">
+    <path d="M6 1.9 7 4.7l2.8 1L7 6.7 6 9.5 5 6.7 2.2 5.7 5 4.7z"/>
+    <path d="m11.6 8.2.65 1.75 1.75.65-1.75.65L11.6 13l-.65-1.75-1.75-.65 1.75-.65z"/>
+  </symbol>
+  <symbol id="i-sidebar" viewBox="0 0 16 16">
+    <rect x="1.3" y="2.6" width="13.4" height="10.8" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.35"/>
+    <path d="M6.1 2.6v10.8" fill="none" stroke="currentColor" stroke-width="1.35"/>
+  </symbol>
+  <symbol id="i-extlink" viewBox="0 0 16 16">
+    <rect x="1.9" y="1.9" width="12.2" height="12.2" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <path d="m5.9 10.1 4.2-4.2M6.5 5.9h3.6v3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 16 16">
+    <path d="m3 8.4 3.4 3.4L13 4.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-pencil" viewBox="0 0 16 16">
+    <path d="M11.1 1.9 14.1 4.9 5.6 13.4l-3.9.9.9-3.9 8.5-8.5Z"
+      fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/>
+    <path d="m9.4 3.6 3 3" fill="none" stroke="currentColor" stroke-width="1.35"/>
+  </symbol>
+  <symbol id="i-slash" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <path d="m3.5 3.5 9 9" fill="none" stroke="currentColor" stroke-width="1.3"/>
+  </symbol>
+</defs></svg>
+
+<header class="bar">
+  <div class="bar__title">SoundFlow <span>— sidebar</span></div>
+  <div class="bar__group">
+    <span class="bar__label">Accent</span>
+    <div class="swatches" id="swatches"></div>
+  </div>
+  <div class="bar__group">
+    <span class="bar__label">Mode</span>
+    <div class="seg" id="mode"><button data-v="dark">Dark</button><button data-v="light">Light</button></div>
+  </div>
+  <div class="bar__group">
+    <span class="bar__label">Show</span>
+    <div class="seg" id="surfaces">
+      <button data-v="both">Both</button>
+      <button data-v="window">Window</button>
+      <button data-v="menubar">Menu bar</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="stage">
+    <div class="stage__item stage__item--window">
+      <div class="stage__cap">Main window — 560 × 440</div>
+      <div id="window"></div>
+    </div>
+    <div class="stage__item stage__item--menu">
+      <div class="stage__cap">Menu bar — 320</div>
+      <div id="menubar"></div>
+    </div>
+  </div>
+
+  <p class="note">
+    <b>Click the pencil</b> on any row to edit that app's name and icon together.
+    Icon source is per-application: an app you have never touched shows its real
+    macOS icon, and <b>Generated</b> mints a tile from a hash of its bundle ID —
+    so it keeps the same identity across launches and re-sorts, rather than
+    whatever colour its position implies.
+    <br><br>
+    <b>Starring updates the rail counts</b> live, and <code>Playing</code> tracks
+    apps currently making sound. Every accent is a real value from
+    <code>Theme.swift</code>.
+  </p>
+</main>
+
+<script>
+"use strict";
+
+/* ==========================================================================
+   Data
+   ========================================================================== */
+
+const THEMES = [
+  { id: "system",   name: "System",   rgb: "10 132 255", lightRgb: "0 122 255", system: true },
+  { id: "ocean",    name: "Ocean",    rgb: "46 140 199"  },
+  { id: "forest",   name: "Forest",   rgb: "61 158 107"  },
+  { id: "sunset",   name: "Sunset",   rgb: "237 112 82"  },
+  { id: "violet",   name: "Violet",   rgb: "133 102 217" },
+  { id: "graphite", name: "Graphite", rgb: "115 120 128" }
+];
+
+/* Every awkward case AppRowView has to survive: a muted app, a DRM-protected
+   one, a starred-but-quit one, and a name too long to fit. */
+const APPS = [
+  { bundle: "com.spotify.client",       name: "Spotify",                       vol: 65,  star: true,  playing: true  },
+  { bundle: "com.google.Chrome",        name: "Google Chrome",                 vol: 100, star: false, playing: true  },
+  { bundle: "us.zoom.xos",              name: "Zoom",                          vol: 40,  star: false, playing: true  },
+  { bundle: "com.apple.Music",          name: "Music",                         vol: 100, star: true,  playing: true,  state: "protected" },
+  { bundle: "com.hnc.Discord",          name: "Discord",                       vol: 55,  star: true,  playing: false, muted: true },
+  { bundle: "com.jetbrains.intellij",   name: "IntelliJ IDEA Ultimate Edition", vol: 30, star: true,  playing: false, state: "inactive" },
+  { bundle: "com.tinyspeck.slackmacgap", name: "Slack",                        vol: 80,  star: false, playing: true  }
+];
+
+/* Simplified stand-ins for the real macOS app icons, so the "Generated icons"
+   toggle compares something meaningful. The shipping app would use
+   NSRunningApplication.icon here. */
+const LOGOS = {
+  "com.spotify.client": `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#1db954"/>
+    <g fill="none" stroke="#000" stroke-linecap="round">
+      <path d="M5.4 9c3.9-1.2 8.5-.8 12.2 1.2" stroke-width="2.2"/>
+      <path d="M6.4 13c3.2-.9 6.9-.6 9.8 1" stroke-width="1.9"/>
+      <path d="M7.3 16.6c2.5-.7 5.4-.4 7.6.8" stroke-width="1.6"/>
+    </g></svg>`,
+  "com.google.Chrome": `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#fff"/>
+    <g transform="rotate(-90 12 12)" fill="none" stroke-width="8">
+      <circle cx="12" cy="12" r="8" stroke="#ea4335" stroke-dasharray="16.75 33.5"/>
+      <circle cx="12" cy="12" r="8" stroke="#fbbc05" stroke-dasharray="16.75 33.5" stroke-dashoffset="-16.75"/>
+      <circle cx="12" cy="12" r="8" stroke="#34a853" stroke-dasharray="16.75 33.5" stroke-dashoffset="-33.5"/>
+    </g>
+    <circle cx="12" cy="12" r="4.8" fill="#fff"/><circle cx="12" cy="12" r="3.6" fill="#4285f4"/></svg>`,
+  "us.zoom.xos": `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#4a8cff"/>
+    <rect x="4" y="8.2" width="10.2" height="7.6" rx="2.1" fill="#fff"/>
+    <path d="M15.2 11.3 20 8.8v6.4l-4.8-2.5z" fill="#fff"/></svg>`,
+  "com.apple.Music": `<svg viewBox="0 0 24 24">
+    <defs><linearGradient id="lgm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fb5c74"/><stop offset="1" stop-color="#f4335c"/></linearGradient></defs>
+    <rect width="24" height="24" fill="url(#lgm)"/>
+    <path d="M17.4 4.8 9.9 6.7v8.8a2.5 2.5 0 1 0 1.6 2.3V9.1l4.3-1.1v5a2.5 2.5 0 1 0 1.6 2.3V4.8Z" fill="#fff"/></svg>`,
+  "com.hnc.Discord": `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#5865f2"/>
+    <path d="M9.5 6.6c-2.3.4-3.8 1.3-3.8 1.3-1.9 2.9-2.3 6.2-2.1 9.3 0 0 1.7 1.5 4.4 1.7l.9-1.4c-1-.3-1.7-.8-1.7-.8 2.8 1.5 6 1.5 8.8 0 0 0-.7.5-1.7.8l.9 1.4c2.7-.2 4.4-1.7 4.4-1.7.2-3.1-.2-6.4-2.1-9.3 0 0-1.5-.9-3.8-1.3l-.4.8a12.4 12.4 0 0 0-3.4 0l-.4-.8Z" fill="#fff"/>
+    <circle cx="9.4" cy="13.6" r="1.35" fill="#5865f2"/><circle cx="14.6" cy="13.6" r="1.35" fill="#5865f2"/></svg>`,
+  "com.jetbrains.intellij": `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#12172b"/>
+    <path d="M0 0h11L0 11z" fill="#fe315d"/><path d="M24 24H13l11-11z" fill="#f97a12"/>
+    <text x="12" y="16.4" text-anchor="middle" fill="#fff"
+      font-family="-apple-system,sans-serif" font-size="9.5" font-weight="700">IJ</text></svg>`,
+  "com.tinyspeck.slackmacgap": `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#fff"/>
+    <rect x="2.6" y="10.2" width="8.4" height="3.6" rx="1.8" fill="#36c5f0"/>
+    <rect x="13" y="10.2" width="8.4" height="3.6" rx="1.8" fill="#2eb67d"/>
+    <rect x="10.2" y="2.6" width="3.6" height="8.4" rx="1.8" fill="#ecb22e"/>
+    <rect x="10.2" y="13" width="3.6" height="8.4" rx="1.8" fill="#e01e5a"/></svg>`
+};
+
+/* Settings that live in the rail. Held here rather than in the DOM so a
+   re-render does not silently reset them. Icon source is deliberately absent:
+   it is a per-app choice made in the editor, not a global switch. */
+const STATE = { login: true, dock: false };
+
+/* ==========================================================================
+   Generated app identity
+   An app the user has never touched shows its real macOS icon; the generated
+   tile is opt-in per app, chosen in the editor sheet.
+   ========================================================================== */
+
+/* FNV-1a. Keyed to the bundle ID, never to list position — an app that
+   re-sorts must not change colour. */
+function hash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+
+/* Quantized to a fixed palette rather than `% 360`. A raw hue lets two apps
+   land 6° apart — Spotify at 27 and Chrome at 21 were indistinguishable — and
+   near-misses read as a bug where an exact repeat reads as a coincidence.
+   These are the same twelve hues the customizer offers, so every automatic
+   colour is one the user could also have picked. */
+const HUES = [8, 32, 48, 92, 140, 168, 196, 216, 252, 286, 318, 342];
+
+const autoHue = app => HUES[hash(app.bundle) % HUES.length];
+
+/* Derived from what the row actually shows, so renaming an app to something
+   recognisable also fixes its tile. */
+const autoLetters = app =>
+  ((app.customName || app.name).match(/[A-Za-z0-9]/g) || ["?"])
+    .slice(0, 1).join("").toUpperCase();
+
+/* Per-app overrides set in the sheet. Keyed by bundle ID, the same way this
+   would be persisted — in its own UserDefaults key, never as a new field on
+   AppPreference (that silently resets every saved volume). */
+const OVERRIDES = {};
+
+function identity(app) {
+  const o = OVERRIDES[app.bundle] || {};
+  return {
+    source:  o.source  ?? "appIcon",
+    hue:     o.hue     ?? autoHue(app),
+    style:   o.style   ?? "gradient",
+    letters: o.letters ?? autoLetters(app)
+  };
+}
+
+function tileBg(id) {
+  return id.style === "solid"
+    ? `hsl(${id.hue} 62% 48%)`
+    : `linear-gradient(160deg, hsl(${id.hue} 72% 52%), hsl(${(id.hue + 26) % 360} 70% 42%))`;
+}
+
+/* Not a button: the pencil is the only way into the editor, so a tile is inert
+   decoration. An app asking for its real icon that macOS gave us nothing for
+   falls back to the generated tile — better than a grey placeholder, and free. */
+const tile = (app, cls = "") => {
+  const id = identity(app);
+  if (id.source === "appIcon" && LOGOS[app.bundle]) {
+    return `<div class="tile tile--logo ${cls}">${LOGOS[app.bundle]}</div>`;
+  }
+  return `<div class="tile ${cls}" style="background:${tileBg(id)}">${id.letters}</div>`;
+};
+
+/* ==========================================================================
+   Atoms
+   ========================================================================== */
+
+const g = (id, cls = "") => `<svg class="glyph ${cls}"><use href="#i-${id}"/></svg>`;
+const meter = () => `<div class="meter"><i></i><i></i><i></i></div>`;
+const slider = (v, extra = "") =>
+  `<input type="range" min="0" max="100" value="${v}" style="--fill:${v}%" ${extra}>`;
+const picker = label => `<div class="picker"><span>${label}</span>${g("updown")}</div>`;
+
+/* Mirrors AppRowView.muteSymbol. */
+const muteIcon = a =>
+  a.muted ? "spkoff" : a.vol < 1 ? "spk" : a.vol < 50 ? "spk1" : "spk2";
+
+/* Mirrors AppRowView.statusText. */
+const status = a =>
+  a.state === "protected" ? "Protected"
+  : a.state === "inactive" ? "Not running"
+  : a.vol + "%";
+
+const row = (a, { star = true } = {}) => `
+  <div class="row" data-bundle="${a.bundle}" data-state="${a.state || ""}">
+    ${tile(a)}
+    <div class="row__body">
+      <div class="row__top">
+        <div class="name">${a.customName || a.name}</div>
+        ${a.playing ? meter() : ""}
+        <div class="pct">${status(a)}</div>
+        ${star ? `
+          <button class="iconbtn" data-edit="${a.bundle}" title="Edit name and icon">${g("pencil")}</button>
+          <button class="iconbtn" data-star data-on="${!!a.star}">${g(a.star ? "starf" : "star")}</button>` : ""}
+      </div>
+      <div class="row__bottom">
+        ${slider(a.vol, a.state === "protected" ? "disabled" : "")}
+        <button class="iconbtn" data-mute data-on="${!!a.muted}">${g(muteIcon(a))}</button>
+      </div>
+    </div>
+  </div>`;
+
+const empty = (icon, title, sub) =>
+  `<div class="empty">${g(icon)}<b>${title}</b><span>${sub}</span></div>`;
+
+/* ==========================================================================
+   The rail
+   ========================================================================== */
+
+const starred = () => APPS.filter(a => a.star);
+const playing = () => APPS.filter(a => a.playing);
+
+const navRow = (id, label, icon, count, active) => `
+  <button class="nav" data-tab="${id}" aria-pressed="${active}">
+    ${g(icon)}<span>${label}</span>${count === undefined ? "" : `<b>${count}</b>`}
+  </button>`;
+
+const check = (id, label, on) => `
+  <button class="check" data-check="${id}" aria-pressed="${on}">
+    <i><svg viewBox="0 0 16 16"><use href="#i-check"/></svg></i><span>${label}</span>
+  </button>`;
+
+function rail(active) {
+  return `
+  <div class="rail scroll">
+    <div class="rail__label">Mixer</div>
+    ${navRow("all",     "All Apps", "sliders", APPS.length,    active === "all")}
+    ${navRow("starred", "Starred",  "starf",   starred().length, active === "starred")}
+    ${navRow("playing", "Playing",  "wave",    playing().length, active === "playing")}
+
+    <div class="rail__label">System</div>
+    ${navRow("devices", "Devices", "speaker-dev", undefined, active === "devices")}
+
+    <div class="rail__label">Settings</div>
+    <div class="rail__inline"><span>Theme</span>${picker(currentThemeName())}</div>
+    ${check("login", "Launch at login", STATE.login)}
+    ${check("dock",  "Hide Dock icon",  STATE.dock)}
+    <button class="danger">${g("reset")}Reset Volumes</button>
+
+    <div class="rail__label">About</div>
+    ${navRow("developer", "Developer", "person",  undefined, active === "developer")}
+    ${navRow("version",   "Version",   "tag",     undefined, active === "version")}
+  </div>`;
+}
+
+/* ==========================================================================
+   Content panes
+   ========================================================================== */
+
+const head = (title, sub) =>
+  `<div class="content__head"><h3>${title}</h3>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+
+const listPane = (id, title, sub, apps, emptyState) => `
+  <div class="pane" data-pane="${id}" ${id === "all" ? "" : "hidden"}>
+    ${head(title, sub)}
+    ${apps.length
+      ? `<div class="list scroll">${apps.map(a => row(a)).join("")}</div>`
+      : emptyState}
+  </div>`;
+
+const devicesPane = () => `
+  <div class="pane" data-pane="devices" hidden>
+    ${head("Devices")}
+    <div class="scroll" style="padding:4px 15px 14px">
+      <div class="stack" style="gap:14px">
+        <div class="card">
+          <div class="card__head">${g("spk2")} Output</div>
+          <div class="stack">
+            ${picker("MacBook Pro Speakers")}
+            <div class="levelslider">${g("spk")}${slider(70)}<div class="pct">70%</div></div>
+            <div class="caption">Built-in</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card__head">${g("mic")} Input</div>
+          <div class="stack">
+            ${picker("MacBook Pro Microphone")}
+            <div class="levelslider">${g("mic")}${slider(85)}<div class="pct">85%</div></div>
+            <div class="caption">Built-in</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+const developerPane = () => `
+  <div class="pane" data-pane="developer" hidden>
+    ${head("Developer")}
+    <div class="scroll" style="padding:4px 15px 14px">
+      <div class="card">
+        <div class="card__head">${g("person")} Credits</div>
+        <div class="stack" style="gap:7px">
+          <div style="font-size:13px;font-weight:500">Ashwin SI</div>
+          <div class="caption">SoundFlow is built on CoreAudio process taps and a
+            private aggregate device, so per-app volume is real rather than a
+            best-effort guess.</div>
+          <a class="link" href="#" onclick="return false">${g("extlink")} github.com/ashwinn-si</a>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+const versionPane = () => `
+  <div class="pane" data-pane="version" hidden>
+    ${head("Version")}
+    <div class="scroll" style="padding:4px 15px 14px">
+      <div class="card">
+        <div class="card__head">${g("tag")} SoundFlow</div>
+        <div class="stack" style="gap:7px">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="font-size:19px;font-weight:600;letter-spacing:-.02em">1.0.0</span>
+            <span class="caption">macOS 15 or later</span>
+          </div>
+          <div class="caption">Read from the bundle, so it cannot drift from Info.plist.</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+/* ==========================================================================
+   The editor sheet — name and icon in one place
+   Reached only from the pencil. The double-click-to-rename shortcut on the row
+   stays as it is; this is the discoverable route to the same thing, plus the
+   icon.
+   ========================================================================== */
+
+function sheet() {
+  return `
+  <div class="sheetwrap" id="sheetwrap" hidden>
+    <div class="sheet" id="sheet"></div>
+  </div>`;
+}
+
+let editing = null;   // bundle ID currently open in the sheet
+let draft = null;     // uncommitted edit, so Cancel is a real cancel
+
+const editingApp = () => APPS.find(a => a.bundle === editing);
+
+/* Preview of what the tile will look like once Done is pressed. */
+function draftTile(app) {
+  if (draft.source === "appIcon" && LOGOS[app.bundle]) {
+    return `<div class="tile tile--lg tile--logo">${LOGOS[app.bundle]}</div>`;
+  }
+  return `<div class="tile tile--lg" style="background:${tileBg(draft)}"
+    >${draft.letters || autoLetters(app)}</div>`;
+}
+
+function renderSheet() {
+  const app = APPS.find(a => a.bundle === editing);
+  if (!app) return;
+
+  const auto = { hue: autoHue(app), letters: autoLetters(app) };
+  const isAuto = !draft.hueSet;
+  const generated = draft.source === "generated";
+  // The tile controls stay visible but inert when the real icon is in use —
+  // hiding them would make the sheet jump height as the segment is toggled.
+  const off = generated ? "" : "disabled";
+
+  const hues = HUES.map(h =>
+    `<button class="hue" data-hue="${h}" ${off} aria-pressed="${!isAuto && draft.hue === h}"
+       style="background:${tileBg({ hue: h, style: draft.style })}"></button>`).join("");
+
+  document.getElementById("sheet").innerHTML = `
+    <div class="sheet__head">
+      ${draftTile(app)}
+      <div>
+        <h4>${app.name}</h4>
+        <p>Name and icon</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field__label">Name</div>
+      <input class="textfield textfield--wide" id="appname" value="${draft.name}"
+        placeholder="${app.name}">
+      <span class="caption">Leave empty to use the name macOS reports.</span>
+    </div>
+
+    <div class="field">
+      <div class="field__label">Icon</div>
+      <div class="styleseg">
+        <button data-source="appIcon" aria-pressed="${!generated}">App Icon</button>
+        <button data-source="generated" aria-pressed="${generated}">Generated</button>
+      </div>
+    </div>
+
+    <div class="field" data-generated aria-disabled="${!generated}">
+      <div class="field__label">Style</div>
+      <div class="styleseg">
+        <button data-style="gradient" ${off} aria-pressed="${draft.style === "gradient"}">Gradient</button>
+        <button data-style="solid" ${off} aria-pressed="${draft.style === "solid"}">Solid</button>
+      </div>
+
+      <div class="field__label" style="margin-top:4px">Colour</div>
+      <div class="hues">
+        <button class="hue hue--auto" data-hue="auto" ${off} aria-pressed="${isAuto}"
+          title="Derived from the bundle ID">${g("sparkle")}</button>
+        ${hues}
+      </div>
+
+      <div class="field__label" style="margin-top:4px">Letters</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <input class="textfield" id="letters" maxlength="2" ${off}
+          value="${draft.letters}" placeholder="${auto.letters}">
+        <span class="caption">Up to two characters.</span>
+      </div>
+    </div>
+
+    <div class="sheet__foot">
+      <button class="btn" data-sheet="reset">Reset</button>
+      <div class="spacer"></div>
+      <button class="btn" data-sheet="cancel">Cancel</button>
+      <button class="btn btn--primary" data-sheet="done">Done</button>
+    </div>`;
+}
+
+function openSheet(bundle) {
+  const app = APPS.find(a => a.bundle === bundle);
+  editing = bundle;
+  draft = { ...identity(app), name: app.customName || "" };
+  document.getElementById("sheetwrap").hidden = false;
+  renderSheet();
+}
+
+function closeSheet() {
+  editing = null; draft = null;
+  document.getElementById("sheetwrap").hidden = true;
+}
+
+/* ==========================================================================
+   Assembly
+   ========================================================================== */
+
+let activeTab = "all";
+
+const currentThemeName = () =>
+  (THEMES.find(t => t.id === document.documentElement.dataset.theme) || THEMES[0]).name;
+
+function renderWindow() {
+  document.getElementById("window").innerHTML = `
+  <div class="mock mock--window">
+    <div class="titlebar">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <button class="iconbtn" title="Hide sidebar">${g("sidebar")}</button>
+    </div>
+    <div class="split">
+      ${rail(activeTab)}
+      <div class="content">
+        ${listPane("all", "All Apps", `${APPS.length} apps`, APPS,
+          empty("spk", "No Audio Apps", "Applications appear here once they start using audio."))}
+        ${listPane("starred", "Starred", `${starred().length} in menu bar`, starred(),
+          empty("star", "Nothing Starred", "Star an app to keep it in the menu bar popover."))}
+        ${listPane("playing", "Playing", `${playing().length} making sound`, playing(),
+          empty("wave", "Nothing Playing", "Apps show up here while they are producing audio."))}
+        ${devicesPane()}
+        ${developerPane()}
+        ${versionPane()}
+      </div>
+    </div>
+    ${sheet()}
+  </div>`;
+
+  // The pane the rail says is selected must actually be the visible one.
+  showPane(activeTab);
+}
+
+function renderMenubar() {
+  const apps = starred().length ? starred() : APPS;
+  document.getElementById("menubar").innerHTML = `
+  <div class="mock mock--menu">
+    <div class="menuhead">
+      ${picker("MacBook Pro Speakers")}
+      <div class="levelslider">${g("spk")}${slider(70)}<div class="pct">70%</div></div>
+    </div>
+    <div class="sep"></div>
+    <div class="list scroll" style="max-height:220px">
+      ${apps.map(a => row(a, { star: false })).join("")}
+    </div>
+    <div class="sep"></div>
+    <div class="footer">
+      <button>Open SoundFlow</button>
+      <div style="flex:1"></div>
+      <button title="Quit SoundFlow">${g("power")}</button>
+    </div>
+  </div>`;
+}
+
+const render = () => { renderWindow(); renderMenubar(); };
+
+function showPane(id) {
+  activeTab = id;
+  const mock = document.querySelector(".mock--window");
+  mock.querySelectorAll("[data-tab]").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.tab === id)));
+  mock.querySelectorAll("[data-pane]").forEach(p => p.hidden = p.dataset.pane !== id);
+}
+
+/* ==========================================================================
+   Theme + mode
+   ========================================================================== */
+
+function applyTheme(id) {
+  const t = THEMES.find(x => x.id === id) || THEMES[0];
+  const mode = document.documentElement.dataset.mode;
+  document.documentElement.dataset.theme = id;
+  document.documentElement.style.setProperty("--accent-rgb",
+    (mode === "light" && t.lightRgb) ? t.lightRgb : t.rgb);
+  document.querySelectorAll("#swatches .swatch").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.theme === id)));
+  // The rail shows the theme name in its inline picker.
+  document.querySelectorAll(".rail__inline .picker span").forEach(s => s.textContent = t.name);
+}
+
+function buildSwatches() {
+  document.getElementById("swatches").innerHTML = THEMES.map(t =>
+    `<button class="swatch" data-theme="${t.id}" title="${t.name}" style="background:rgb(${t.rgb})">
+       ${t.system ? '<svg viewBox="0 0 16 16"><use href="#i-sparkle"/></svg>' : ""}
+     </button>`).join("");
+}
+
+function setSeg(groupId, value, attr) {
+  document.documentElement.dataset[attr] = value;
+  document.querySelectorAll(`#${groupId} button`).forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.v === value)));
+}
+
+/* ==========================================================================
+   Events
+   ========================================================================== */
+
+document.addEventListener("click", e => {
+  const swatch = e.target.closest(".swatch");
+  if (swatch) { applyTheme(swatch.dataset.theme); return; }
+
+  const seg = e.target.closest("#mode button, #surfaces button");
+  if (seg) {
+    const group = seg.parentElement.id;
+    setSeg(group, seg.dataset.v, group === "mode" ? "mode" : "surfaces");
+    // System blue differs between appearances, so re-resolve on a mode change.
+    if (group === "mode") applyTheme(document.documentElement.dataset.theme);
+    return;
+  }
+
+  /* --- the sheet --------------------------------------------------------- */
+
+  const editBtn = e.target.closest("[data-edit]");
+  if (editBtn) { openSheet(editBtn.dataset.edit); return; }
+
+  const sourceBtn = e.target.closest("[data-source]");
+  if (sourceBtn) { draft.source = sourceBtn.dataset.source; renderSheet(); return; }
+
+  const styleBtn = e.target.closest("[data-style]");
+  if (styleBtn) { draft.style = styleBtn.dataset.style; renderSheet(); return; }
+
+  const hueBtn = e.target.closest("[data-hue]");
+  if (hueBtn) {
+    const app = APPS.find(a => a.bundle === editing);
+    if (hueBtn.dataset.hue === "auto") { draft.hue = autoHue(app); draft.hueSet = false; }
+    else { draft.hue = Number(hueBtn.dataset.hue); draft.hueSet = true; }
+    renderSheet();
+    return;
+  }
+
+  const act = e.target.closest("[data-sheet]")?.dataset.sheet;
+  if (act === "cancel") { closeSheet(); return; }
+  if (act === "reset")  {
+    // Clears the icon override and the custom name together — "Reset" on a
+    // sheet that edits both would be a lie if it only undid half.
+    const app = APPS.find(a => a.bundle === editing);
+    delete OVERRIDES[editing];
+    app.customName = null;
+    closeSheet(); render(); return;
+  }
+  if (act === "done")   {
+    const app = APPS.find(a => a.bundle === editing);
+    const trimmed = draft.name.trim();
+    // Blank or unchanged clears the override rather than storing a duplicate,
+    // matching MixerEngine.rename.
+    app.customName = (!trimmed || trimmed === app.name) ? null : trimmed;
+    OVERRIDES[editing] = {
+      source: draft.source, hue: draft.hue, style: draft.style, hueSet: draft.hueSet,
+      letters: (draft.letters || autoLetters(app)).slice(0, 2)
+    };
+    closeSheet(); render(); return;
+  }
+  // Click-off dismisses, as a sheet's backdrop does.
+  if (e.target.id === "sheetwrap") { closeSheet(); return; }
+
+  /* --- rail -------------------------------------------------------------- */
+
+  const check = e.target.closest("[data-check]");
+  if (check) {
+    const key = check.dataset.check;
+    STATE[key] = !STATE[key];
+    check.setAttribute("aria-pressed", String(STATE[key]));
+    return;
+  }
+
+  const tab = e.target.closest("[data-tab]");
+  if (tab) { showPane(tab.dataset.tab); return; }
+
+  /* --- rows -------------------------------------------------------------- */
+
+  const star = e.target.closest("[data-star]");
+  if (star) {
+    const bundle = star.closest(".row").dataset.bundle;
+    const app = APPS.find(a => a.bundle === bundle);
+    app.star = !app.star;
+    // Unstarring out of the Starred pane would leave it selected but empty —
+    // which is correct, and worth seeing.
+    render();
+    return;
+  }
+
+  const mute = e.target.closest("[data-mute]");
+  if (mute) {
+    const bundle = mute.closest(".row").dataset.bundle;
+    const app = APPS.find(a => a.bundle === bundle);
+    app.muted = !app.muted;
+    mute.dataset.on = String(app.muted);
+    mute.querySelector("use").setAttribute("href", "#i-" + muteIcon(app));
+  }
+});
+
+document.addEventListener("input", e => {
+  const el = e.target;
+
+  // Both fields update the preview in place rather than re-rendering, so they
+  // keep focus and the caret does not jump.
+  if (el.id === "letters") {
+    draft.letters = el.value.toUpperCase();
+    const preview = document.querySelector(".tile--lg:not(.tile--logo)");
+    if (preview) preview.textContent = draft.letters || "?";
+    return;
+  }
+
+  if (el.id === "appname") {
+    draft.name = el.value;
+    document.querySelector(".sheet__head h4").textContent = el.value.trim() || editingApp().name;
+    return;
+  }
+
+  if (el.type !== "range") return;
+  const v = Number(el.value);
+  el.style.setProperty("--fill", v + "%");
+
+  const scope = el.closest(".row, .levelslider, .card");
+  if (!scope) return;
+
+  const bundle = scope.dataset?.bundle;
+  if (bundle) APPS.find(a => a.bundle === bundle).vol = v;
+
+  const pct = scope.querySelector(".pct");
+  if (pct && !/[a-zA-Z]/.test(pct.textContent)) pct.textContent = v + "%";
+
+  const mute = scope.querySelector("[data-mute]");
+  if (mute && mute.dataset.on !== "true") {
+    mute.querySelector("use").setAttribute("href",
+      "#i-" + (v < 1 ? "spk" : v < 50 ? "spk1" : "spk2"));
+  }
+});
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && editing) closeSheet();
+});
+
+/* --- boot ----------------------------------------------------------------- */
+
+buildSwatches();
+setSeg("mode", "dark", "mode");
+setSeg("surfaces", "both", "surfaces");
+render();
+applyTheme("sunset");
+</script>
+</body>
+</html>

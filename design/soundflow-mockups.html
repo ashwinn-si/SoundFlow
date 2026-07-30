@@ -1,0 +1,1271 @@
+<!doctype html>
+<html lang="en" data-mode="dark" data-theme="sunset" data-surfaces="both">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoundFlow — layout studies</title>
+<style>
+/* ==========================================================================
+   0. Page shell
+   The page itself is deliberately NOT washed with the accent — the mocks are
+   the things being judged, and a tinted page would contaminate the comparison.
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --font: -apple-system, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Overwritten by JS from the theme picker. */
+  --accent-rgb: 237 112 82;
+  --accent: rgb(var(--accent-rgb));
+}
+
+html[data-mode="dark"] {
+  --page: #131211;
+  --page-fg: #ebe9e7;
+  --page-fg-2: rgb(235 233 231 / .55);
+  --page-line: rgb(255 255 255 / .09);
+  --page-card: rgb(255 255 255 / .04);
+
+  /* --- the mock's own palette -------------------------------------------- */
+  --base: #181716;          /* warm-neutral, not pure grey */
+  --fg-rgb: 255 255 255;
+  --text:   rgb(255 255 255 / .92);
+  --text-2: rgb(255 255 255 / .55);
+  --text-3: rgb(255 255 255 / .32);
+  --sep:    rgb(255 255 255 / .08);
+  --hairline: rgb(255 255 255 / .07);
+  --fill-1: rgb(255 255 255 / .05);
+  --fill-2: rgb(255 255 255 / .09);
+  --track:  rgb(255 255 255 / .16);
+  --knob:   #e6e4e2;
+  --shadow: 0 18px 44px rgb(0 0 0 / .55), 0 2px 8px rgb(0 0 0 / .4);
+
+  --wash-1: 26%;            /* top-left bloom, hottest at the corner */
+  --wash-1m: 9%;            /* its mid stop — a single stop falls off too fast */
+  --wash-2: 7%;             /* bottom-right counter-light */
+  --card-wash: 6%;
+  --card-edge: 14%;
+}
+
+html[data-mode="light"] {
+  --page: #dedcd8;
+  --page-fg: #201f1d;
+  --page-fg-2: rgb(32 31 29 / .58);
+  --page-line: rgb(0 0 0 / .12);
+  --page-card: rgb(255 255 255 / .5);
+
+  --base: #f3f2f0;
+  --fg-rgb: 0 0 0;
+  --text:   rgb(0 0 0 / .88);
+  --text-2: rgb(0 0 0 / .55);
+  --text-3: rgb(0 0 0 / .34);
+  --sep:    rgb(0 0 0 / .09);
+  --hairline: rgb(0 0 0 / .08);
+  --fill-1: rgb(0 0 0 / .04);
+  --fill-2: rgb(0 0 0 / .07);
+  --track:  rgb(0 0 0 / .13);
+  --knob:   #ffffff;
+  --shadow: 0 18px 40px rgb(0 0 0 / .22), 0 2px 6px rgb(0 0 0 / .12);
+
+  /* A 14% wash that reads as elegant on charcoal reads as a coffee stain on
+     white. Light mode gets a markedly gentler bloom. */
+  --wash-1: 9%;
+  --wash-2: 3.5%;
+  --card-wash: 5%;
+  --card-edge: 16%;
+}
+
+body {
+  margin: 0;
+  padding: 0 0 96px;
+  background: var(--page);
+  color: var(--page-fg);
+  font: 13px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- sticky control bar --------------------------------------------------- */
+
+.bar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  padding: 12px 22px;
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(20px) saturate(160%);
+  border-bottom: 1px solid var(--page-line);
+}
+.bar__title { font-size: 13px; font-weight: 600; letter-spacing: -.01em; margin-right: 4px; }
+.bar__title span { color: var(--page-fg-2); font-weight: 400; }
+.bar__group { display: flex; align-items: center; gap: 8px; }
+.bar__label {
+  font-size: 10px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--page-fg-2);
+}
+
+.swatches { display: flex; gap: 7px; }
+.swatch {
+  width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
+  cursor: pointer; position: relative;
+  display: grid; place-items: center;
+  transition: transform .14s ease;
+}
+.swatch:hover { transform: scale(1.08); }
+.swatch[aria-pressed="true"]::after {
+  content: ""; position: absolute; inset: -4px;
+  border: 2px solid var(--page-fg); border-radius: 50%; opacity: .85;
+}
+.swatch svg { width: 10px; height: 10px; fill: rgb(255 255 255 / .9); }
+
+.seg {
+  display: flex; padding: 2px; gap: 2px; border-radius: 8px;
+  background: var(--page-card); border: 1px solid var(--page-line);
+}
+.seg button {
+  border: 0; background: transparent; cursor: pointer;
+  font: 500 11.5px var(--font); color: var(--page-fg-2);
+  padding: 4px 11px; border-radius: 6px;
+}
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+/* --- variant sections ----------------------------------------------------- */
+
+.variant { padding: 46px 22px 0; max-width: 1240px; }
+.variant__head { margin-bottom: 20px; }
+.variant__n {
+  display: inline-block; min-width: 20px; height: 20px; line-height: 20px;
+  text-align: center; border-radius: 5px; margin-right: 9px;
+  background: var(--accent); color: #fff;
+  font: 600 11px var(--mono);
+}
+.variant__name { font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
+.variant__why {
+  margin: 7px 0 0; max-width: 66ch;
+  color: var(--page-fg-2); font-size: 12.5px; line-height: 1.6;
+}
+.stage { display: flex; gap: 30px; align-items: flex-start; flex-wrap: wrap; }
+.stage__item { display: flex; flex-direction: column; gap: 9px; }
+.stage__cap {
+  font: 600 10px var(--font); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--page-fg-2);
+}
+html[data-surfaces="window"]  .stage__item--menu,
+html[data-surfaces="menubar"] .stage__item--window { display: none; }
+
+/* ==========================================================================
+   1. The mock chrome
+   ========================================================================== */
+
+.mock {
+  position: relative; overflow: hidden;
+  color: var(--text); font: 13px/1.4 var(--font);
+  border-radius: 11px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--hairline);
+  display: flex; flex-direction: column;
+  /* The wash, defined exactly once and inherited by every variant. */
+  background:
+    radial-gradient(125% 95% at 0% 0%,
+      rgb(var(--accent-rgb) / var(--wash-1)) 0%, transparent 66%),
+    radial-gradient(105% 85% at 100% 100%,
+      rgb(var(--accent-rgb) / var(--wash-2)) 0%, transparent 62%),
+    var(--base);
+}
+.mock--menu   { width: 320px; }
+.mock--window { width: 400px; height: 420px; }
+.mock--wide   { width: 560px; }
+
+/* Traffic lights, so the window mock is judged as a window. */
+.titlebar {
+  display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 12px; flex: 0 0 auto;
+}
+.lights { display: flex; gap: 8px; }
+.lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+
+.sep { height: 1px; background: var(--sep); flex: 0 0 auto; }
+
+.scroll { overflow-y: auto; overscroll-behavior: contain; flex: 1 1 auto; }
+.scroll::-webkit-scrollbar { width: 8px; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--fg-rgb) / .2); border-radius: 4px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+
+/* ==========================================================================
+   2. Controls — native metrics, accent for state only
+   ========================================================================== */
+
+.glyph { width: 1em; height: 1em; fill: currentColor; flex: 0 0 auto; display: block; }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 15px; background: transparent; margin: 0;
+  cursor: pointer; flex: 1 1 auto; min-width: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(to right,
+    var(--accent) 0 var(--fill, 50%), var(--track) var(--fill, 50%) 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; border-radius: 50%; margin-top: -5.5px;
+  background: var(--knob);
+  border: .5px solid rgb(0 0 0 / .2);
+  box-shadow: 0 1px 2.5px rgb(0 0 0 / .35);
+}
+input[type="range"]:disabled { cursor: default; opacity: .9; }
+
+.pct {
+  font: 11px/1 var(--mono); color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto; text-align: right;
+}
+
+.iconbtn {
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+  color: var(--text-2); display: grid; place-items: center;
+  width: 18px; height: 18px; flex: 0 0 auto; font-size: 13px;
+}
+.iconbtn:hover { color: var(--text); }
+.iconbtn[data-on="true"] { color: var(--accent); }
+
+/* Pull-down picker (.pickerStyle(.menu)) */
+.picker {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 22px; padding: 0 7px 0 9px; border-radius: 6px;
+  background: var(--fill-2); border: 1px solid var(--hairline);
+  font-size: 12px; color: var(--text); cursor: default;
+  max-width: 100%;
+}
+.picker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker .glyph { font-size: 11px; color: var(--text-2); margin-left: auto; }
+
+.switch {
+  width: 26px; height: 15px; border-radius: 8px; border: 0; padding: 0;
+  background: var(--track); position: relative; cursor: pointer; flex: 0 0 auto;
+  transition: background .16s ease;
+}
+.switch::after {
+  content: ""; position: absolute; top: 1px; left: 1px;
+  width: 13px; height: 13px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .3); transition: transform .16s ease;
+}
+.switch[aria-pressed="true"] { background: var(--accent); }
+.switch[aria-pressed="true"]::after { transform: translateX(11px); }
+
+.btn {
+  border: 1px solid var(--hairline); background: var(--fill-2);
+  color: var(--text); border-radius: 6px; padding: 4px 11px;
+  font: 12px var(--font); cursor: pointer;
+}
+
+/* --- app icon tile -------------------------------------------------------- */
+.tile {
+  border-radius: 7px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  font: 700 13px var(--font); color: #fff;
+  text-shadow: 0 1px 2px rgb(0 0 0 / .3);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .25), 0 1px 2px rgb(0 0 0 / .25);
+  width: 28px; height: 28px;
+}
+
+/* --- live level meter ----------------------------------------------------- */
+.meter { display: flex; align-items: flex-end; gap: 1.5px; height: 10px; flex: 0 0 auto; }
+.meter i {
+  width: 2px; border-radius: 1px; background: var(--accent); display: block;
+  transform-origin: bottom;
+  animation: bounce 1s ease-in-out infinite alternate;
+}
+.meter i:nth-child(1) { height: 6px;  animation-duration: .78s; }
+.meter i:nth-child(2) { height: 10px; animation-duration: .55s; }
+.meter i:nth-child(3) { height: 8px;  animation-duration: .95s; }
+@keyframes bounce { from { transform: scaleY(.22); } to { transform: scaleY(1); } }
+
+/* Wide meter, for the hero variant. */
+.meter--wide { height: 18px; gap: 2.5px; }
+.meter--wide i { width: 3px; height: 18px; border-radius: 1.5px; opacity: .85; }
+
+/* ==========================================================================
+   3. Shared row atoms
+   ========================================================================== */
+
+.name {
+  font-size: 13px; font-weight: 500; letter-spacing: -.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.row[data-state="protected"] { opacity: .5; }
+.row[data-state="inactive"]  { opacity: .65; }
+
+.empty {
+  display: grid; place-items: center; gap: 6px; text-align: center;
+  padding: 44px 24px; color: var(--text-2);
+}
+
+/* --- section card, matching DevicesView.card / SettingsView.section -------- */
+.card {
+  border-radius: 10px; padding: 12px;
+  background:
+    linear-gradient(rgb(var(--accent-rgb) / var(--card-wash)) 0 100%),
+    var(--fill-1);
+  border: 1px solid rgb(var(--accent-rgb) / var(--card-edge));
+}
+.card__head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 10px;
+  font: 600 10.5px var(--font); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-2);
+}
+.card__head .glyph { font-size: 11px; }
+.caption { font-size: 11px; color: var(--text-3); }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.levelslider { display: flex; align-items: center; gap: 8px; }
+.levelslider > .glyph { font-size: 10px; color: var(--text-2); width: 14px; }
+.levelslider .pct { width: 34px; }
+
+.themerow { display: flex; gap: 10px; }
+.themedot {
+  width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
+  cursor: pointer; position: relative; display: grid; place-items: center;
+}
+.themedot[aria-pressed="true"]::after {
+  content: ""; position: absolute; inset: -3px;
+  border: 2px solid var(--text); border-radius: 50%; opacity: .85;
+}
+.themedot svg { width: 9px; height: 9px; fill: rgb(255 255 255 / .9); }
+.toggle-line { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.toggle-line span { flex: 1 1 auto; }
+.link { color: var(--accent); display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+
+/* --- footer (menu bar) ---------------------------------------------------- */
+.footer {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; flex: 0 0 auto;
+}
+.footer button {
+  border: 0; background: transparent; cursor: pointer; padding: 0;
+  color: var(--accent); font: 500 12px var(--font);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+
+/* ==========================================================================
+   4. Navigation
+   ========================================================================== */
+
+.nav { display: flex; gap: 4px; padding: 8px 10px; flex: 0 0 auto; }
+.nav button {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 5px 10px; border-radius: 7px;
+  font: 500 12px var(--font); color: var(--text-2);
+}
+.nav button .glyph { font-size: 11px; }
+.nav button[aria-pressed="true"] {
+  color: var(--accent);
+  background: rgb(var(--accent-rgb) / .16);
+}
+
+.pane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.pane[hidden] { display: none; }
+
+/* ==========================================================================
+   5. Variant 1 — Ambient
+   Today's layout, wash added. Nothing structural moves.
+   ========================================================================== */
+
+.v1 .masterrow { display: flex; gap: 12px; padding: 10px 14px; align-items: center; }
+.v1 .masterrow > .glyph { font-size: 13px; color: var(--text-2); width: 28px; }
+.v1 .masterrow__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.v1 .masterrow__top { display: flex; align-items: center; gap: 6px; }
+.v1 .masterrow__top .name { flex: 1 1 auto; }
+
+.v1 .list { padding: 6px 8px; }
+.v1 .row { display: flex; gap: 12px; padding: 6px 6px; border-radius: 8px; }
+.v1 .row:hover { background: var(--fill-1); }
+.v1 .row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.v1 .row__top { display: flex; align-items: center; gap: 6px; }
+.v1 .row__top .name { flex: 0 1 auto; }
+.v1 .row__top .pct { margin-left: auto; }
+.v1 .row__bottom { display: flex; align-items: center; gap: 8px; }
+
+.v1 .menuhead { padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
+.v1 .menuhead__top { display: flex; align-items: center; gap: 8px; }
+.v1 .menuhead__top > span { font-size: 11px; color: var(--text-2); }
+
+/* ==========================================================================
+   6. Variant 2 — Carded rows
+   Each app is its own surface, with a lit top edge. Closest to MultiClips.
+   ========================================================================== */
+
+.v2 .list { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.v2 .row {
+  position: relative; display: flex; gap: 11px; padding: 10px 11px;
+  border-radius: 10px;
+  background:
+    linear-gradient(rgb(var(--accent-rgb) / var(--card-wash)) 0 100%),
+    var(--fill-1);
+  border: 1px solid rgb(var(--accent-rgb) / var(--card-edge));
+}
+/* The lit edge: a hairline that fades out across the top of the card. */
+.v2 .row::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 1px;
+  border-radius: 10px 10px 0 0;
+  background: linear-gradient(90deg,
+    rgb(var(--accent-rgb) / .55), rgb(var(--accent-rgb) / .06) 62%, transparent);
+}
+.v2 .row .tile { width: 32px; height: 32px; border-radius: 8px; font-size: 15px; }
+.v2 .row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.v2 .row__top { display: flex; align-items: center; gap: 7px; }
+.v2 .row__top .name { flex: 0 1 auto; }
+.v2 .row__top .meter { margin-left: 1px; }
+.v2 .row__top .pct { margin-left: auto; }
+.v2 .row__bottom { display: flex; align-items: center; gap: 9px; }
+.v2 .master { margin: 10px 10px 0; }
+.v2 .menuhead { padding: 10px 10px 0; }
+
+/* ==========================================================================
+   7. Variant 3 — Sidebar
+   MultiClips' own structure: a counted rail replaces the top pills.
+   ========================================================================== */
+
+.v3 .split { display: flex; flex: 1 1 auto; min-height: 0; }
+.v3 .rail {
+  width: 152px; flex: 0 0 auto; padding: 4px 8px 8px;
+  border-right: 1px solid var(--sep);
+  display: flex; flex-direction: column; gap: 2px;
+  background: rgb(var(--fg-rgb) / .025);
+}
+.v3 .rail__label {
+  font: 600 10px var(--font); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-3); padding: 10px 8px 4px;
+}
+.v3 .rail button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 5px 8px; border-radius: 7px;
+  font: 500 12.5px var(--font); color: var(--text-2); text-align: left;
+}
+.v3 .rail button .glyph { font-size: 12px; }
+.v3 .rail button > span { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3 .rail button b {
+  font: 600 10.5px var(--mono); color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.v3 .rail button[aria-pressed="true"] {
+  background: rgb(var(--accent-rgb) / .16); color: var(--accent);
+}
+.v3 .rail button[aria-pressed="true"] b { color: var(--accent); }
+.v3 .rail__foot { margin-top: auto; padding: 8px 8px 2px; border-top: 1px solid var(--sep); }
+
+.v3 .content { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.v3 .content__head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; flex: 0 0 auto;
+}
+.v3 .content__head h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.02em; }
+.v3 .list { padding: 4px 8px 8px; }
+.v3 .row { display: flex; gap: 12px; padding: 7px 6px; border-radius: 8px; }
+.v3 .row:hover { background: var(--fill-1); }
+.v3 .row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.v3 .row__top { display: flex; align-items: center; gap: 6px; }
+.v3 .row__top .pct { margin-left: auto; }
+.v3 .row__bottom { display: flex; align-items: center; gap: 8px; }
+
+/* ==========================================================================
+   8. Variant 4 — Dense
+   One line per app. Twice the apps before a scroll.
+   ========================================================================== */
+
+.v4 .mock { }
+.v4 .bloom {
+  /* Gradient concentrated as a header bloom rather than a whole-window wash. */
+  padding: 9px 14px; flex: 0 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(rgb(var(--accent-rgb) / .13), transparent);
+}
+.v4 .bloom > .glyph { font-size: 12px; color: var(--text-2); }
+.v4 .bloom .name { flex: 0 1 auto; }
+.v4 .bloom input[type="range"] { max-width: 150px; margin-left: auto; }
+.v4 .bloom .pct { width: 32px; }
+
+.v4 .list { padding: 4px 6px 8px; }
+.v4 .row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 4px 8px; border-radius: 7px; height: 30px;
+}
+.v4 .row:hover { background: var(--fill-1); }
+.v4 .row .tile { width: 19px; height: 19px; border-radius: 5px; font-size: 9.5px; }
+.v4 .row .name { flex: 1 1 auto; font-size: 12.5px; }
+.v4 .row input[type="range"] { flex: 0 0 108px; width: 108px; }
+.v4 .row .pct { width: 33px; }
+.v4 .colhead {
+  display: flex; align-items: center; gap: 9px; padding: 4px 8px 3px;
+  font: 600 9.5px var(--font); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-3);
+}
+.v4 .colhead .sp { flex: 1 1 auto; }
+.v4 .colhead .a { flex: 0 0 108px; }
+.v4 .colhead .b { width: 33px; text-align: right; }
+
+/* ==========================================================================
+   9. Variant 5 — Hero header
+   The output device is the gradient anchor; the list sits on plain material.
+   ========================================================================== */
+
+.v5 .hero {
+  padding: 4px 16px 16px; flex: 0 0 auto;
+  display: flex; flex-direction: column; gap: 11px;
+  background:
+    radial-gradient(140% 130% at 12% 0%,
+      rgb(var(--accent-rgb) / .3) 0%, rgb(var(--accent-rgb) / .05) 55%, transparent 78%);
+}
+.v5 .hero__label {
+  font: 600 10px var(--font); letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-2); display: flex; align-items: center; gap: 6px;
+}
+.v5 .hero__name {
+  font-size: 19px; font-weight: 600; letter-spacing: -.025em; line-height: 1.15;
+}
+.v5 .hero__meter { display: flex; align-items: flex-end; gap: 2.5px; height: 18px; }
+.v5 .hero__row { display: flex; align-items: center; gap: 10px; }
+.v5 .hero__row .pct { font-size: 12px; width: 36px; }
+.v5 .hero__row > .glyph { font-size: 11px; color: var(--text-2); }
+
+/* The list deliberately drops back to plain material so the hero stays the
+   only lit thing in the window. */
+.v5 .body { background: rgb(var(--fg-rgb) / .022); flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.v5 .list { padding: 6px 8px 8px; }
+.v5 .row { display: flex; gap: 12px; padding: 6px 6px; border-radius: 8px; }
+.v5 .row:hover { background: var(--fill-1); }
+.v5 .row__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.v5 .row__top { display: flex; align-items: center; gap: 6px; }
+.v5 .row__top .pct { margin-left: auto; }
+.v5 .row__bottom { display: flex; align-items: center; gap: 8px; }
+.v5 .nav { padding-bottom: 2px; }
+</style>
+</head>
+<body>
+
+<!-- SF Symbols do not exist in a browser. These approximate the ~14 glyphs the
+     app actually uses, at the same optical weight. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-spk" viewBox="0 0 16 16">
+    <path d="M8.3 2.2 4.7 5.1H2.6a.9.9 0 0 0-.9.9v4c0 .5.4.9.9.9h2.1l3.6 2.9c.55.44 1.2.05 1.2-.55V2.75c0-.6-.65-.99-1.2-.55Z"/>
+  </symbol>
+  <symbol id="i-spk1" viewBox="0 0 16 16">
+    <path d="M8.3 2.2 4.7 5.1H2.6a.9.9 0 0 0-.9.9v4c0 .5.4.9.9.9h2.1l3.6 2.9c.55.44 1.2.05 1.2-.55V2.75c0-.6-.65-.99-1.2-.55Z"/>
+    <path d="M11.3 5.9a3.3 3.3 0 0 1 0 4.2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-spk2" viewBox="0 0 16 16">
+    <path d="M8.3 2.2 4.7 5.1H2.6a.9.9 0 0 0-.9.9v4c0 .5.4.9.9.9h2.1l3.6 2.9c.55.44 1.2.05 1.2-.55V2.75c0-.6-.65-.99-1.2-.55Z"/>
+    <path d="M11.3 5.9a3.3 3.3 0 0 1 0 4.2M13.5 3.9a6.2 6.2 0 0 1 0 8.2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-spkoff" viewBox="0 0 16 16">
+    <path d="M8.3 2.2 4.7 5.1H2.6a.9.9 0 0 0-.9.9v4c0 .5.4.9.9.9h2.1l3.6 2.9c.55.44 1.2.05 1.2-.55V2.75c0-.6-.65-.99-1.2-.55Z"/>
+    <path d="m11.1 5.9 3.6 4.2M14.7 5.9l-3.6 4.2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-mic" viewBox="0 0 16 16">
+    <path d="M8 1.4a2.2 2.2 0 0 0-2.2 2.2v4.2a2.2 2.2 0 0 0 4.4 0V3.6A2.2 2.2 0 0 0 8 1.4Z"/>
+    <path d="M3.7 7.4v.5a4.3 4.3 0 0 0 8.6 0v-.5M8 12.3v2.2" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-star" viewBox="0 0 16 16">
+    <path d="M8 1.7 9.9 5.6l4.3.6-3.1 3 .74 4.3L8 11.5l-3.84 2 .74-4.3-3.1-3 4.3-.6z"
+      fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-starf" viewBox="0 0 16 16">
+    <path d="M8 1.7 9.9 5.6l4.3.6-3.1 3 .74 4.3L8 11.5l-3.84 2 .74-4.3-3.1-3 4.3-.6z"/>
+  </symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16">
+    <path fill-rule="evenodd" d="M6.85.9h2.3l.3 1.72 1.13.47L12 2.06l1.94 1.94-1.03 1.42.47 1.13 1.72.3v2.3l-1.72.3-.47 1.13L13.94 12 12 13.94l-1.42-1.03-1.13.47-.3 1.72h-2.3l-.3-1.72-1.13-.47L4 13.94 2.06 12l1.03-1.42-.47-1.13-1.72-.3v-2.3l1.72-.3.47-1.13L2.06 4 4 2.06l1.42 1.03 1.13-.47ZM8 5.85A2.15 2.15 0 1 0 8 10.15 2.15 2.15 0 0 0 8 5.85Z"/>
+  </symbol>
+  <symbol id="i-sliders" viewBox="0 0 16 16">
+    <path d="M3.9 1.8v3.3M3.9 8.6v5.6M8 1.8v6.4M8 11.7v2.5M12.1 1.8v1.5M12.1 6.8v7.4"
+      fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/>
+    <circle cx="3.9" cy="6.85" r="1.65"/><circle cx="8" cy="9.95" r="1.65"/><circle cx="12.1" cy="5.05" r="1.65"/>
+  </symbol>
+  <symbol id="i-speaker-dev" viewBox="0 0 16 16">
+    <rect x="3.4" y="1.5" width="9.2" height="13" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <circle cx="8" cy="9.6" r="2.3"/><circle cx="8" cy="4.7" r="1"/>
+  </symbol>
+  <symbol id="i-power" viewBox="0 0 16 16">
+    <path d="M8 1.7v6.1M4.55 3.9a5.15 5.15 0 1 0 6.9 0"
+      fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-updown" viewBox="0 0 16 16">
+    <path d="m4.9 6.5 3.1-3 3.1 3M4.9 9.5l3.1 3 3.1-3"
+      fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-warn" viewBox="0 0 16 16">
+    <path d="M8 2.1 1.5 13.5h13L8 2.1Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M8 6.1v3.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+    <circle cx="8" cy="11.5" r=".8"/>
+  </symbol>
+  <symbol id="i-palette" viewBox="0 0 16 16">
+    <path d="M8 1.5C4.1 1.5 1 4.4 1 8c0 3.5 3 5.7 5.6 5.7 1.3 0 1.9-.6 1.9-1.4 0-.5-.3-.8-.3-1.3 0-.6.5-1 1.2-1H11c2.3 0 4-1.6 4-3.9C15 3.2 12 1.5 8 1.5Z"
+      fill="none" stroke="currentColor" stroke-width="1.25"/>
+    <circle cx="4.5" cy="6.6" r=".95"/><circle cx="7.1" cy="4.6" r=".95"/>
+    <circle cx="10.3" cy="5.3" r=".95"/><circle cx="11.9" cy="8" r=".95"/>
+  </symbol>
+  <symbol id="i-reset" viewBox="0 0 16 16">
+    <path d="M2.4 8a5.6 5.6 0 1 0 1.75-4.05" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/>
+    <path d="M1.6 2.3v3.5h3.5" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-info" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <circle cx="8" cy="4.9" r=".85"/>
+    <path d="M8 7.1v4.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-sparkle" viewBox="0 0 16 16">
+    <path d="M6 1.9 7 4.7l2.8 1L7 6.7 6 9.5 5 6.7 2.2 5.7 5 4.7z"/>
+    <path d="m11.6 8.2.65 1.75 1.75.65-1.75.65L11.6 13l-.65-1.75-1.75-.65 1.75-.65z"/>
+  </symbol>
+  <symbol id="i-window" viewBox="0 0 16 16">
+    <rect x="1.3" y="3" width="13.4" height="10" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.35"/>
+    <path d="M1.3 6.2h13.4" fill="none" stroke="currentColor" stroke-width="1.35"/>
+  </symbol>
+  <symbol id="i-extlink" viewBox="0 0 16 16">
+    <rect x="1.9" y="1.9" width="12.2" height="12.2" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    <path d="m5.9 10.1 4.2-4.2M6.5 5.9h3.6v3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+</defs></svg>
+
+<header class="bar">
+  <div class="bar__title">SoundFlow <span>— layout studies</span></div>
+
+  <div class="bar__group">
+    <span class="bar__label">Accent</span>
+    <div class="swatches" id="swatches"></div>
+  </div>
+
+  <div class="bar__group">
+    <span class="bar__label">Mode</span>
+    <div class="seg" id="mode">
+      <button data-v="dark">Dark</button><button data-v="light">Light</button>
+    </div>
+  </div>
+
+  <div class="bar__group">
+    <span class="bar__label">Show</span>
+    <div class="seg" id="surfaces">
+      <button data-v="both">Both</button>
+      <button data-v="window">Window</button>
+      <button data-v="menubar">Menu bar</button>
+    </div>
+  </div>
+</header>
+
+<main id="main"></main>
+
+<script>
+"use strict";
+
+/* ==========================================================================
+   Data — accents lifted verbatim from Sources/SoundFlowApp/Theme.swift
+   ========================================================================== */
+
+const THEMES = [
+  { id: "system",   name: "System",   rgb: "10 132 255",  lightRgb: "0 122 255", system: true },
+  { id: "ocean",    name: "Ocean",    rgb: "46 140 199"  },
+  { id: "forest",   name: "Forest",   rgb: "61 158 107"  },
+  { id: "sunset",   name: "Sunset",   rgb: "237 112 82"  },
+  { id: "violet",   name: "Violet",   rgb: "133 102 217" },
+  { id: "graphite", name: "Graphite", rgb: "115 120 128" }
+];
+
+/* Every awkward case AppRowView has to survive is represented: a muted app, a
+   DRM-protected one, a starred-but-quit one, and a name too long to fit. */
+const APPS = [
+  { id:"spotify",  name:"Spotify",                    vol:65,  star:true,  playing:true,  a:"#1ed760", b:"#0f9d47", ch:"S" },
+  { id:"chrome",   name:"Google Chrome",              vol:100, star:false, playing:true,  a:"#4285f4", b:"#34a853", ch:"C" },
+  { id:"zoom",     name:"Zoom",                       vol:40,  star:false, playing:true,  a:"#4a8cff", b:"#2563d9", ch:"Z" },
+  { id:"music",    name:"Music",                      vol:100, star:true,  playing:true,  a:"#fc5c7d", b:"#f43b5c", ch:"M", state:"protected" },
+  { id:"discord",  name:"Discord",                    vol:55,  star:true,  playing:false, a:"#5865f2", b:"#4049c4", ch:"D", muted:true },
+  { id:"intellij", name:"IntelliJ IDEA Ultimate Edition", vol:30, star:true, playing:false, a:"#fe315d", b:"#f97a12", ch:"IJ", state:"inactive" },
+  { id:"slack",    name:"Slack",                      vol:80,  star:false, playing:true,  a:"#e01e5a", b:"#ecb22e", ch:"#" }
+];
+
+const STARRED = APPS.filter(a => a.star);
+
+/* ==========================================================================
+   Atoms
+   ========================================================================== */
+
+const g = (id, cls = "") => `<svg class="glyph ${cls}"><use href="#i-${id}"/></svg>`;
+
+const tile = a =>
+  `<div class="tile" style="background:linear-gradient(160deg,${a.a},${a.b})">${a.ch}</div>`;
+
+const meter = (cls = "") => `<div class="meter ${cls}"><i></i><i></i><i></i></div>`;
+
+const wideMeter = (n = 26) => {
+  let out = "";
+  for (let i = 0; i < n; i++) {
+    // Staggered durations and delays so it reads as audio, not as a progress bar.
+    const d = (0.45 + (i % 5) * 0.17).toFixed(2);
+    const delay = ((i % 7) * 0.09).toFixed(2);
+    out += `<i style="animation-duration:${d}s;animation-delay:-${delay}s"></i>`;
+  }
+  return `<div class="meter meter--wide">${out}</div>`;
+};
+
+const slider = (v, extra = "") =>
+  `<input type="range" min="0" max="100" value="${v}" style="--fill:${v}%" ${extra}>`;
+
+const picker = label => `<div class="picker"><span>${label}</span>${g("updown")}</div>`;
+
+/* Mirrors AppRowView.muteSymbol. */
+function muteIcon(a) {
+  if (a.muted) return "spkoff";
+  if (a.vol < 1) return "spk";
+  if (a.vol < 50) return "spk1";
+  return "spk2";
+}
+
+/* Mirrors AppRowView.statusText. */
+const status = a =>
+  a.state === "protected" ? "Protected"
+  : a.state === "inactive" ? "Not running"
+  : a.vol + "%";
+
+const starBtn = a =>
+  `<button class="iconbtn" data-star data-on="${!!a.star}">${g(a.star ? "starf" : "star")}</button>`;
+
+const muteBtn = a =>
+  `<button class="iconbtn" data-mute data-on="${!!a.muted}">${g(muteIcon(a))}</button>`;
+
+const disabled = a => (a.state === "protected" ? "disabled" : "");
+
+/* ==========================================================================
+   Row renderers — one per layout family
+   ========================================================================== */
+
+/* Two-line row: exactly today's AppRowView. Used by v1, v3, v5. */
+function rowStd(a, { star = true } = {}) {
+  return `
+  <div class="row" data-state="${a.state || ""}">
+    ${tile(a)}
+    <div class="row__body">
+      <div class="row__top">
+        <div class="name">${a.name}</div>
+        ${a.playing ? meter() : ""}
+        <div class="pct">${status(a)}</div>
+        ${star ? starBtn(a) : ""}
+      </div>
+      <div class="row__bottom">
+        ${slider(a.vol, disabled(a))}
+        ${muteBtn(a)}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* v2: the row becomes a card. */
+function rowCard(a, { star = true } = {}) {
+  return `
+  <div class="row" data-state="${a.state || ""}">
+    ${tile(a)}
+    <div class="row__body">
+      <div class="row__top">
+        <div class="name">${a.name}</div>
+        ${a.playing ? meter() : ""}
+        <div class="pct">${status(a)}</div>
+        ${star ? starBtn(a) : ""}
+      </div>
+      <div class="row__bottom">
+        ${slider(a.vol, disabled(a))}
+        ${muteBtn(a)}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* v4: everything on one line. */
+function rowDense(a, { star = true } = {}) {
+  return `
+  <div class="row" data-state="${a.state || ""}">
+    ${tile(a)}
+    <div class="name">${a.name}</div>
+    ${a.playing ? meter() : ""}
+    ${slider(a.vol, disabled(a))}
+    <div class="pct">${status(a)}</div>
+    ${muteBtn(a)}
+    ${star ? starBtn(a) : ""}
+  </div>`;
+}
+
+const list = (rows, apps, opts) =>
+  `<div class="scroll list">${apps.map(a => rows(a, opts)).join("")}</div>`;
+
+/* ==========================================================================
+   Shared panes — Devices and Settings keep their card structure in every
+   variant, because "conservative" means the surface treatment changes and the
+   information architecture does not.
+   ========================================================================== */
+
+function devicesPane() {
+  return `
+  <div class="scroll" style="padding:14px">
+    <div class="stack" style="gap:14px">
+      <div class="card">
+        <div class="card__head">${g("spk2")} Output</div>
+        <div class="stack">
+          ${picker("MacBook Pro Speakers")}
+          <div class="levelslider">${g("spk")}${slider(70)}<div class="pct">70%</div></div>
+          <div class="caption">Built-in</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card__head">${g("mic")} Input</div>
+        <div class="stack">
+          ${picker("MacBook Pro Microphone")}
+          <div class="levelslider">${g("mic")}${slider(85)}<div class="pct">85%</div></div>
+          <div class="caption">Built-in</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function settingsPane() {
+  const dots = THEMES.map(t =>
+    `<button class="themedot" data-theme="${t.id}" style="background:rgb(${t.rgb})" title="${t.name}">
+       ${t.system ? '<svg viewBox="0 0 16 16"><use href="#i-sparkle"/></svg>' : ""}
+     </button>`).join("");
+
+  return `
+  <div class="scroll" style="padding:14px">
+    <div class="stack" style="gap:14px">
+      <div class="card">
+        <div class="card__head">${g("palette")} Theme</div>
+        <div class="stack">
+          <div class="themerow">${dots}</div>
+          <div class="caption" data-theme-name>Sunset</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__head">${g("power")} Startup</div>
+        <div class="stack">
+          <div class="toggle-line"><span>Launch at login</span>
+            <button class="switch" data-switch aria-pressed="true"></button></div>
+          <div class="sep"></div>
+          <div class="toggle-line"><span>Hide Dock icon</span>
+            <button class="switch" data-switch aria-pressed="false"></button></div>
+          <div class="caption">SoundFlow stays available from the menu bar either way.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__head">${g("reset")} Levels</div>
+        <div class="stack" style="align-items:flex-start">
+          <button class="btn">Reset All Volumes</button>
+          <div class="caption">Sets every application back to 100% and clears saved
+            levels. Stars and custom names are kept.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__head">${g("info")} About</div>
+        <div class="stack" style="gap:5px">
+          <div style="font-size:12.5px;font-weight:500">SoundFlow
+            <span class="pct" style="margin-left:5px">v1.0.0</span></div>
+          <div class="caption">Developed by Ashwin SI</div>
+          <a class="link" href="#" onclick="return false">${g("extlink")} github.com/ashwinn-si</a>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+const nav = (active = "mixer") => {
+  const items = [
+    ["mixer", "Mixer", "sliders"],
+    ["devices", "Devices", "speaker-dev"],
+    ["settings", "Settings", "gear"]
+  ];
+  return `<div class="nav">${items.map(([id, label, icon]) =>
+    `<button data-tab="${id}" aria-pressed="${id === active}">${g(icon)}${label}</button>`
+  ).join("")}</div>`;
+};
+
+const titlebar = () => `<div class="titlebar"><div class="lights"><i></i><i></i><i></i></div></div>`;
+
+const footer = () => `
+  <div class="sep"></div>
+  <div class="footer">
+    <button>Open SoundFlow</button>
+    <div style="flex:1"></div>
+    <button title="Quit SoundFlow">${g("power")}</button>
+  </div>`;
+
+/* ==========================================================================
+   Variant 1 — Ambient
+   ========================================================================== */
+
+const v1Window = () => `
+<div class="mock mock--window v1">
+  ${titlebar()}
+  ${nav()}
+  <div class="sep"></div>
+  <div class="pane" data-pane="mixer">
+    <div class="masterrow">
+      ${g("spk2")}
+      <div class="masterrow__body">
+        <div class="masterrow__top">
+          <div class="name">MacBook Pro Speakers</div>
+          <div class="pct">70%</div>
+        </div>
+        ${slider(70)}
+      </div>
+    </div>
+    <div class="sep"></div>
+    ${list(rowStd, APPS)}
+  </div>
+  <div class="pane" data-pane="devices" hidden>${devicesPane()}</div>
+  <div class="pane" data-pane="settings" hidden>${settingsPane()}</div>
+</div>`;
+
+const v1Menu = () => `
+<div class="mock mock--menu v1">
+  <div class="menuhead">
+    <div class="menuhead__top"><span>Output</span>${picker("MacBook Pro Speakers")}</div>
+    <div class="levelslider">${g("spk")}${slider(70)}<div class="pct">70%</div></div>
+  </div>
+  <div class="sep"></div>
+  ${list(rowStd, STARRED, { star: false })}
+  ${footer()}
+</div>`;
+
+/* ==========================================================================
+   Variant 2 — Carded rows
+   ========================================================================== */
+
+const v2Window = () => `
+<div class="mock mock--window v2">
+  ${titlebar()}
+  ${nav()}
+  <div class="pane" data-pane="mixer">
+    <div class="card master">
+      <div class="stack" style="gap:8px">
+        <div class="row__top" style="display:flex;align-items:center;gap:7px">
+          ${g("spk2", "")}
+          <div class="name">MacBook Pro Speakers</div>
+          <div class="pct" style="margin-left:auto">70%</div>
+        </div>
+        ${slider(70)}
+      </div>
+    </div>
+    ${list(rowCard, APPS)}
+  </div>
+  <div class="pane" data-pane="devices" hidden>${devicesPane()}</div>
+  <div class="pane" data-pane="settings" hidden>${settingsPane()}</div>
+</div>`;
+
+const v2Menu = () => `
+<div class="mock mock--menu v2">
+  <div class="menuhead">
+    <div class="card">
+      <div class="stack" style="gap:9px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;color:var(--text-2)">Output</span>
+          ${picker("MacBook Pro Speakers")}
+        </div>
+        <div class="levelslider">${g("spk")}${slider(70)}<div class="pct">70%</div></div>
+      </div>
+    </div>
+  </div>
+  ${list(rowCard, STARRED, { star: false })}
+  ${footer()}
+</div>`;
+
+/* ==========================================================================
+   Variant 3 — Sidebar
+   ========================================================================== */
+
+const v3Window = () => `
+<div class="mock mock--window mock--wide v3">
+  ${titlebar()}
+  <div class="split">
+    <div class="rail">
+      <div class="rail__label">Mixer</div>
+      <button data-tab="mixer" aria-pressed="true">${g("sliders")}<span>All Apps</span><b>${APPS.length}</b></button>
+      <button data-tab="starred">${g("starf")}<span>Starred</span><b>${STARRED.length}</b></button>
+      <div class="rail__label">System</div>
+      <button data-tab="devices">${g("speaker-dev")}<span>Devices</span></button>
+      <button data-tab="settings">${g("gear")}<span>Settings</span></button>
+      <div class="rail__foot">
+        <div class="levelslider" style="gap:6px">${g("spk")}${slider(70)}</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="pane" data-pane="mixer">
+        <div class="content__head"><h3>All Apps</h3></div>
+        ${list(rowStd, APPS)}
+      </div>
+      <div class="pane" data-pane="starred" hidden>
+        <div class="content__head"><h3>Starred</h3></div>
+        ${list(rowStd, STARRED)}
+      </div>
+      <div class="pane" data-pane="devices" hidden>
+        <div class="content__head"><h3>Devices</h3></div>
+        ${devicesPane()}
+      </div>
+      <div class="pane" data-pane="settings" hidden>
+        <div class="content__head"><h3>Settings</h3></div>
+        ${settingsPane()}
+      </div>
+    </div>
+  </div>
+</div>`;
+
+/* The rail does not shrink to 320pt, so the popover keeps the plain list. */
+const v3Menu = () => `
+<div class="mock mock--menu v3">
+  <div class="content__head" style="padding:11px 14px 6px">
+    <h3 style="font-size:13px">SoundFlow</h3>
+    <div class="pct" style="margin-left:auto">${STARRED.length} starred</div>
+  </div>
+  <div style="padding:0 12px 10px">
+    <div class="card">
+      <div class="stack" style="gap:9px">
+        ${picker("MacBook Pro Speakers")}
+        <div class="levelslider">${g("spk")}${slider(70)}<div class="pct">70%</div></div>
+      </div>
+    </div>
+  </div>
+  ${list(rowStd, STARRED, { star: false })}
+  ${footer()}
+</div>`;
+
+/* ==========================================================================
+   Variant 4 — Dense
+   ========================================================================== */
+
+const v4Window = () => `
+<div class="mock mock--window v4">
+  ${titlebar()}
+  ${nav()}
+  <div class="pane" data-pane="mixer">
+    <div class="bloom">
+      ${g("spk2")}
+      <div class="name">MacBook Pro Speakers</div>
+      ${slider(70)}
+      <div class="pct">70%</div>
+    </div>
+    <div class="colhead">
+      <span style="width:19px"></span><span class="sp">Application</span>
+      <span class="a">Level</span><span class="b"></span>
+      <span style="width:18px"></span><span style="width:18px"></span>
+    </div>
+    ${list(rowDense, APPS)}
+  </div>
+  <div class="pane" data-pane="devices" hidden>${devicesPane()}</div>
+  <div class="pane" data-pane="settings" hidden>${settingsPane()}</div>
+</div>`;
+
+const v4Menu = () => `
+<div class="mock mock--menu v4">
+  <div class="bloom">
+    ${g("spk2")}
+    <div class="name">MacBook Pro Speakers</div>
+    ${slider(70)}
+    <div class="pct">70%</div>
+  </div>
+  ${list(rowDense, STARRED, { star: false })}
+  ${footer()}
+</div>`;
+
+/* ==========================================================================
+   Variant 5 — Hero header
+   ========================================================================== */
+
+const v5Hero = () => `
+  <div class="hero">
+    <div class="hero__label">${g("spk2")} Output</div>
+    <div class="hero__name">MacBook Pro Speakers</div>
+    ${wideMeter()}
+    <div class="hero__row">${g("spk")}${slider(70)}<div class="pct">70%</div></div>
+  </div>`;
+
+const v5Window = () => `
+<div class="mock mock--window v5">
+  ${titlebar()}
+  ${nav()}
+  <div class="pane" data-pane="mixer">
+    ${v5Hero()}
+    <div class="body">${list(rowStd, APPS)}</div>
+  </div>
+  <div class="pane" data-pane="devices" hidden>${devicesPane()}</div>
+  <div class="pane" data-pane="settings" hidden>${settingsPane()}</div>
+</div>`;
+
+const v5Menu = () => `
+<div class="mock mock--menu v5">
+  <div style="height:6px"></div>
+  ${v5Hero()}
+  <div class="body">${list(rowStd, STARRED, { star: false })}</div>
+  ${footer()}
+</div>`;
+
+/* ==========================================================================
+   Page assembly
+   ========================================================================== */
+
+const VARIANTS = [
+  { name: "Ambient",
+    why: "Today's layout, untouched. Only the accent wash and a tinted list surface are added — the pills, the master row and the two-line app rows all stay exactly where they are. The floor: if you like the finish but not the rearranging, this is the whole change.",
+    window: v1Window, menu: v1Menu },
+
+  { name: "Carded rows",
+    why: "Every app becomes its own surface with a hairline border and a lit top edge, the way MultiClips treats a clip. Closest to the screenshot you liked. Costs vertical space: about five rows fit where seven did.",
+    window: v2Window, menu: v2Menu },
+
+  { name: "Sidebar",
+    why: "MultiClips' actual structure. A counted rail replaces the top pills and buys a real Starred section instead of a star-per-row filter. Needs a wider window (560pt), and the rail cannot follow into the 320pt popover — so the two surfaces stop being the same view.",
+    window: v3Window, menu: v3Menu },
+
+  { name: "Dense",
+    why: "Name, meter, slider and percentage all on one 30pt line. Twice the apps before a scroll, and the popover finally shows a full list without one. The gradient retreats to a header bloom, since a full wash behind tight rows turns muddy.",
+    window: v4Window, menu: v4Menu },
+
+  { name: "Hero header",
+    why: "The output device becomes the subject: large name, wide live meter, full-width master slider, and the gradient concentrated behind it. The app list drops to plain material so exactly one thing in the window is lit.",
+    window: v5Window, menu: v5Menu }
+];
+
+function build() {
+  document.getElementById("main").innerHTML = VARIANTS.map((v, i) => `
+    <section class="variant">
+      <div class="variant__head">
+        <div><span class="variant__n">${i + 1}</span><span class="variant__name">${v.name}</span></div>
+        <p class="variant__why">${v.why}</p>
+      </div>
+      <div class="stage">
+        <div class="stage__item stage__item--window">
+          <div class="stage__cap">Main window</div>${v.window()}
+        </div>
+        <div class="stage__item stage__item--menu">
+          <div class="stage__cap">Menu bar</div>${v.menu()}
+        </div>
+      </div>
+    </section>`).join("");
+}
+
+/* --- theme + mode --------------------------------------------------------- */
+
+function applyTheme(id) {
+  const t = THEMES.find(x => x.id === id) || THEMES[0];
+  const mode = document.documentElement.dataset.mode;
+  const rgb = (mode === "light" && t.lightRgb) ? t.lightRgb : t.rgb;
+
+  document.documentElement.dataset.theme = id;
+  document.documentElement.style.setProperty("--accent-rgb", rgb);
+
+  document.querySelectorAll("#swatches .swatch").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.theme === id)));
+  document.querySelectorAll(".themedot").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.theme === id)));
+  document.querySelectorAll("[data-theme-name]").forEach(n => n.textContent = t.name);
+}
+
+function buildSwatches() {
+  document.getElementById("swatches").innerHTML = THEMES.map(t =>
+    `<button class="swatch" data-theme="${t.id}" title="${t.name}" style="background:rgb(${t.rgb})">
+       ${t.system ? '<svg viewBox="0 0 16 16"><use href="#i-sparkle"/></svg>' : ""}
+     </button>`).join("");
+}
+
+function setSeg(groupId, value, attr) {
+  document.documentElement.dataset[attr] = value;
+  document.querySelectorAll(`#${groupId} button`).forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.v === value)));
+}
+
+/* --- events --------------------------------------------------------------- */
+
+document.addEventListener("click", e => {
+  const swatch = e.target.closest(".swatch, .themedot");
+  if (swatch) { applyTheme(swatch.dataset.theme); return; }
+
+  const seg = e.target.closest("#mode button, #surfaces button");
+  if (seg) {
+    const group = seg.parentElement.id;
+    setSeg(group, seg.dataset.v, group === "mode" ? "mode" : "surfaces");
+    // System blue differs between appearances, so re-resolve on a mode change.
+    if (group === "mode") applyTheme(document.documentElement.dataset.theme);
+    return;
+  }
+
+  const sw = e.target.closest("[data-switch]");
+  if (sw) {
+    sw.setAttribute("aria-pressed", sw.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    return;
+  }
+
+  const star = e.target.closest("[data-star]");
+  if (star) {
+    const on = star.dataset.on !== "true";
+    star.dataset.on = String(on);
+    star.querySelector("use").setAttribute("href", on ? "#i-starf" : "#i-star");
+    return;
+  }
+
+  const mute = e.target.closest("[data-mute]");
+  if (mute) {
+    const on = mute.dataset.on !== "true";
+    mute.dataset.on = String(on);
+    const range = mute.closest(".row").querySelector('input[type="range"]');
+    const v = range ? Number(range.value) : 100;
+    mute.querySelector("use").setAttribute("href",
+      "#i-" + (on ? "spkoff" : v < 1 ? "spk" : v < 50 ? "spk1" : "spk2"));
+    return;
+  }
+
+  const tab = e.target.closest("[data-tab]");
+  if (tab) {
+    const mock = tab.closest(".mock");
+    mock.querySelectorAll("[data-tab]").forEach(b =>
+      b.setAttribute("aria-pressed", String(b === tab)));
+    mock.querySelectorAll("[data-pane]").forEach(p =>
+      p.hidden = p.dataset.pane !== tab.dataset.tab);
+  }
+});
+
+document.addEventListener("input", e => {
+  const r = e.target;
+  if (r.type !== "range") return;
+
+  const v = Number(r.value);
+  r.style.setProperty("--fill", v + "%");
+
+  // Keep the percentage and the mute glyph in step, exactly as AppRowView does.
+  const scope = r.closest(".row, .masterrow, .levelslider, .bloom, .hero, .card");
+  if (!scope) return;
+
+  const pct = scope.querySelector(".pct");
+  if (pct && !/[a-zA-Z]/.test(pct.textContent)) pct.textContent = v + "%";
+
+  const mute = scope.querySelector("[data-mute]");
+  if (mute && mute.dataset.on !== "true") {
+    mute.querySelector("use").setAttribute("href",
+      "#i-" + (v < 1 ? "spk" : v < 50 ? "spk1" : "spk2"));
+  }
+});
+
+/* --- boot ----------------------------------------------------------------- */
+
+buildSwatches();
+build();
+setSeg("mode", "dark", "mode");
+setSeg("surfaces", "both", "surfaces");
+applyTheme("sunset");
+</script>
+</body>
+</html>
