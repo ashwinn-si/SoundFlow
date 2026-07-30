@@ -3,45 +3,136 @@ import CoreAudio
 import SwiftUI
 import SoundFlowCore
 
-/// The mixer: output device, master volume, and one row per audio application.
+/// The mixer.
 ///
-/// Deliberately plain — system materials, system accent colour, automatic
-/// light/dark. No gradients or hardcoded colours anywhere.
+/// Two layouts from one view. The main window gets a nav bar and three tabs;
+/// the menu bar popover stays a single lean list, because a dropdown is for a
+/// two-second adjustment and tabs would make it a chore.
+///
+/// Colour comes from exactly one place: the theme accent, applied once as a
+/// `tint` at the root so sliders, stars and toggles inherit it. Everything else
+/// is system material and automatic light/dark.
 struct MixerView: View {
     let engine: MixerEngine
     /// Trimmed layout for the menu bar popover.
     var compact = false
 
+    @AppStorage(Preferences.themeKey) private var themeID = Themes.system.id
+    @State private var tab: MixerTab = .mixer
     @Environment(\.openWindow) private var openWindow
 
+    private var theme: Theme { Themes.theme(id: themeID) }
+
     var body: some View {
+        Group {
+            if compact {
+                compactLayout
+            } else {
+                windowLayout
+            }
+        }
+        .tint(theme.accent)
+        .environment(\.themeAccent, theme.accent)
+        .frame(minWidth: compact ? 300 : 400,
+               minHeight: compact ? 260 : 420)
+        .frame(width: compact ? 320 : nil)
+    }
+
+    // MARK: - Main window
+
+    @ViewBuilder
+    private var windowLayout: some View {
+        if engine.permission == .denied {
+            PermissionView(engine: engine)
+        } else {
+            VStack(spacing: 0) {
+                NavBar(selection: $tab)
+                Divider()
+
+                switch tab {
+                case .mixer:
+                    mixerTab
+                case .devices:
+                    DevicesView(engine: engine)
+                case .settings:
+                    SettingsView(engine: engine)
+                }
+            }
+        }
+    }
+
+    /// The master level stays here rather than moving to Devices with the
+    /// pickers — it is adjusted constantly, and burying it a tab away would be
+    /// a downgrade. Only device *selection* moved.
+    private var mixerTab: some View {
+        VStack(spacing: 0) {
+            if engine.hasMasterVolumeControl {
+                masterRow
+                Divider()
+            }
+            appList
+        }
+    }
+
+    private var masterRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "speaker.wave.2.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(engine.outputDeviceName)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    Text("\(Int(engine.masterVolume * 100))%")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(
+                    value: Binding(
+                        get: { Double(engine.masterVolume) },
+                        set: { engine.masterVolume = Float($0) }
+                    ),
+                    in: 0...1
+                )
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Menu bar
+
+    private var compactLayout: some View {
         VStack(spacing: 0) {
             if engine.permission == .denied {
                 PermissionView(engine: engine)
             } else {
-                header
+                compactHeader
                 Divider()
                 appList
             }
 
-            // The menu bar is the only way back to the app when the Dock icon
-            // is hidden, so it carries the window and quit actions.
-            if compact {
-                Divider()
-                footer
-            }
+            Divider()
+            footer
         }
-        .frame(minWidth: compact ? 300 : 380,
-               minHeight: compact ? 260 : 360)
-        .frame(width: compact ? 320 : nil)
     }
 
-    // MARK: - Header
-
-    private var header: some View {
+    /// Output device and master level only. Input lives in the Devices tab —
+    /// switching a microphone is not a menu bar errand.
+    private var compactHeader: some View {
         VStack(spacing: 10) {
             HStack {
-                deviceLabel("Output")
+                Text("Output")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Picker("Output", selection: outputSelection) {
                     ForEach(engine.outputDevices) { device in
@@ -53,49 +144,16 @@ struct MixerView: View {
                 .fixedSize()
 
                 Spacer(minLength: 0)
-
-                // The menu bar has its own gear in the footer.
-                if !compact { settingsButton }
             }
 
             if engine.hasMasterVolumeControl {
-                levelSlider(
+                LevelSlider(
                     symbol: "speaker.fill",
                     value: Binding(
                         get: { Double(engine.masterVolume) },
                         set: { engine.masterVolume = Float($0) }
                     )
                 )
-            }
-
-            // Input is the system default capture device. Changing it is a
-            // system-wide switch, exactly like the Sound settings pane — it has
-            // nothing to do with the per-app output route.
-            if !engine.inputDevices.isEmpty {
-                HStack {
-                    deviceLabel("Input")
-
-                    Picker("Input", selection: inputSelection) {
-                        ForEach(engine.inputDevices) { device in
-                            Text(device.name).tag(device.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .fixedSize()
-
-                    Spacer(minLength: 0)
-                }
-
-                if engine.hasInputVolumeControl {
-                    levelSlider(
-                        symbol: "mic.fill",
-                        value: Binding(
-                            get: { Double(engine.inputVolume) },
-                            set: { engine.inputVolume = Float($0) }
-                        )
-                    )
-                }
             }
 
             if let error = engine.routeError {
@@ -109,64 +167,6 @@ struct MixerView: View {
         .padding(.vertical, 10)
     }
 
-    /// Fixed width so the Output and Input pickers line up.
-    private func deviceLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(width: 44, alignment: .leading)
-    }
-
-    private func levelSlider(symbol: String, value: Binding<Double>) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .frame(width: 14)
-
-            Slider(value: value, in: 0...1)
-                .controlSize(.small)
-
-            Text("\(Int(value.wrappedValue * 100))%")
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .trailing)
-        }
-    }
-
-    private var settingsButton: some View {
-        SettingsLink {
-            Image(systemName: "gearshape")
-                .font(.system(size: 12))
-        }
-        .buttonStyle(.borderless)
-        .help("Settings")
-    }
-
-    private var outputSelection: Binding<AudioObjectID> {
-        Binding(
-            get: { engine.outputDevices.first { $0.name == engine.outputDeviceName }?.id ?? 0 },
-            set: { newID in
-                if let device = engine.outputDevices.first(where: { $0.id == newID }) {
-                    engine.selectOutputDevice(device)
-                }
-            }
-        )
-    }
-
-    private var inputSelection: Binding<AudioObjectID> {
-        Binding(
-            get: { engine.inputDeviceID },
-            set: { newID in
-                if let device = engine.inputDevices.first(where: { $0.id == newID }) {
-                    engine.selectInputDevice(device)
-                }
-            }
-        )
-    }
-
-    // MARK: - Footer
-
     private var footer: some View {
         HStack(spacing: 10) {
             Button("Open SoundFlow") {
@@ -178,8 +178,6 @@ struct MixerView: View {
             .buttonStyle(.link)
 
             Spacer(minLength: 0)
-
-            settingsButton
 
             Button {
                 // Routes through applicationWillTerminate, which destroys every
@@ -194,6 +192,17 @@ struct MixerView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    }
+
+    private var outputSelection: Binding<AudioObjectID> {
+        Binding(
+            get: { engine.outputDevices.first { $0.name == engine.outputDeviceName }?.id ?? 0 },
+            set: { newID in
+                if let device = engine.outputDevices.first(where: { $0.id == newID }) {
+                    engine.selectOutputDevice(device)
+                }
+            }
+        )
     }
 
     // MARK: - Apps

@@ -18,6 +18,7 @@ enum Preferences {
     private static let favoritesKey = "SoundFlow.favoriteApps"
     private static let customNamesKey = "SoundFlow.customNames"
     static let hideDockIconKey = "SoundFlow.hideDockIcon"
+    static let themeKey = "SoundFlow.theme"
 
     static func load() -> [String: AppPreference] {
         guard let data = UserDefaults.standard.data(forKey: storeKey),

@@ -27,9 +27,7 @@ struct AppRowView: View {
                     }
 
                     if app.isPlaying {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+                        LevelMeter(level: app.level)
                             .accessibilityLabel("Playing")
                     }
 
@@ -176,5 +174,43 @@ struct AppRowView: View {
         if app.volume < 0.01 { return "speaker.fill" }
         if app.volume < 0.5 { return "speaker.wave.1.fill" }
         return "speaker.wave.2.fill"
+    }
+}
+
+// MARK: - LevelMeter
+
+/// Three bars that rise and fall with the app's live RMS.
+///
+/// Replaces the static `waveform` glyph that used to mark a playing app. The
+/// data was already there — `MixerEngine` writes `AppMix.level` every 80 ms —
+/// it just was not being shown. Only tapped apps produce a level, so an app at
+/// 100% shows the bars at rest, which correctly reads as "playing, untouched".
+struct LevelMeter: View {
+    let level: Float
+
+    @Environment(\.themeAccent) private var accent
+
+    /// Each bar reacts at its own pace so the group looks alive rather than
+    /// like one block scaling up and down.
+    private let weights: [Float] = [0.65, 1.0, 0.8]
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 1.5) {
+            ForEach(weights.indices, id: \.self) { index in
+                Capsule()
+                    .fill(accent)
+                    .frame(width: 2, height: height(for: weights[index]))
+            }
+        }
+        .frame(width: 10, height: 10, alignment: .bottom)
+        .opacity(0.9)
+        .animation(.easeOut(duration: 0.12), value: level)
+    }
+
+    private func height(for weight: Float) -> CGFloat {
+        // sqrt lifts the low end: RMS spends most of its time near zero, and a
+        // linear map would leave the bars looking permanently flat.
+        let scaled = sqrt(max(0, min(1, level))) * weight
+        return 2 + CGFloat(scaled) * 8
     }
 }

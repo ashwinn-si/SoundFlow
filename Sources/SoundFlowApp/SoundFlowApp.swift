@@ -34,9 +34,9 @@ struct SoundFlowApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Settings {
-            SettingsView(engine: engine)
-        }
+        // No `Settings` scene: settings live in the main window as a tab. With
+        // the Dock icon hidden there is no app menu, so a separate settings
+        // scene would be unreachable.
     }
 }
 

@@ -67,8 +67,12 @@ what destroys the live taps.
 | `TapPermission.swift` | TCC state. Screen-capture preflight, **not** tap success. |
 | `Sources/SoundFlowApp/` | The app. |
 | `MixerEngine.swift` | `@MainActor @Observable`. Owns `AppMix` list, prefs, and the route. The only place that decides what gets tapped. |
-| `MixerView.swift` | Shared UI for the window and the menu bar (`compact` flag). Output + input device pickers, master/input level, Settings button, and the menu bar footer: Open / Settings / Quit. |
-| `AppRowView.swift` | One app row: icon, name (double-click to rename), slider, %, star, mute, context menu. |
+| `MixerView.swift` | Root UI. Main window = nav bar + 3 tabs; menu bar (`compact`) = one lean list + footer. Applies the theme tint. |
+| `NavBar.swift` | `MixerTab` enum and the top pill navigation. |
+| `DevicesView.swift` | Devices tab: output/input pickers and their levels. Also owns the shared `LevelSlider`. |
+| `Theme.swift` | Accent presets, `Themes.all`, and the `\.themeAccent` environment key. |
+| `SettingsView.swift` | Settings **tab** (not a scene): theme swatches, startup, reset, about. |
+| `AppRowView.swift` | One app row: icon, name (double-click to rename), live `LevelMeter`, slider, %, star, mute, context menu. |
 | `Preferences.swift` | `UserDefaults`: volume/mute blob, favourites, custom names, hide-Dock-icon. |
 | `LaunchAtLogin.swift` | `SMAppService.mainApp` wrapper. No mirrored preference — the service is the source of truth. |
 | `SoundFlowApp.swift` | Scenes, `AppDelegate`, teardown on quit. |
@@ -157,6 +161,11 @@ an explicit `init(from:)` using `decodeIfPresent`.
 
 ## Style
 
-Plain SwiftUI: system materials, system accent, automatic light/dark. No
-gradients, no hardcoded colours. Comments explain *why* — especially the
-CoreAudio workarounds — and the existing density is the target.
+System materials, automatic light/dark, SF Symbols. **Colour comes from exactly
+one place**: the theme accent, applied once as `.tint()` at the root of
+`MixerView`, so sliders, stars and toggles inherit it. Views that need the raw
+`Color` (custom-drawn bars) read `\.themeAccent` from the environment. Do not
+hardcode a colour anywhere else, and do not add gradients.
+
+Comments explain *why* — especially the CoreAudio workarounds — and the
+existing density is the target.

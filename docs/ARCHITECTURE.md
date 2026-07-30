@@ -275,22 +275,46 @@ without hopping to the main actor.
   dimmed to 65%, and keep working controls — the level is saved and applies the
   next time the app produces audio. Unstarring an inactive row removes it
   outright, since nothing is left to show.
-- The header carries **Output** and **Input** device pickers plus a level
-  slider for each. Input is the *system default capture device*: selecting one
-  writes `kAudioHardwarePropertyDefaultInputDevice`, exactly what the Sound
-  settings pane does, and has nothing to do with the per-app output route —
+- The main window is a **nav bar plus three tabs** — Mixer, Devices, Settings.
+  The **master level stays on the Mixer tab** as a row above the app list: it is
+  adjusted constantly, and burying it a tab away would be a downgrade. Only
+  device *selection* moved to Devices.
+- **Devices** holds the Output and Input pickers with a level for each. Input is
+  the *system default capture device*: selecting one writes
+  `kAudioHardwarePropertyDefaultInputDevice`, exactly what the Sound settings
+  pane does, and has nothing to do with the per-app output route —
   `selectInputDevice` calls `refreshInputState()` only, never `refreshDevices()`.
   Either slider hides when the device exposes no settable volume
-  (`hasMasterVolumeControl` / `hasInputVolumeControl`); that is common for HDMI
-  outputs and for most microphones.
-- A **Settings** gear sits in the header in the main window only — the menu bar
-  has its own in the footer. Both use SwiftUI's `SettingsLink`.
-- The menu bar popover has a footer (`compact` only) with **Open SoundFlow**,
-  **Settings**, and **Quit**. It renders even when permission is denied — with
-  the Dock icon hidden, this is the only route back into the app, and Quit is
-  the only thing that runs `applicationWillTerminate` and destroys the taps.
-  `openWindow(id: "main")` is followed by `NSApp.activate()`, which is required
-  in `.accessory` mode.
+  (`hasMasterVolumeControl` / `hasInputVolumeControl`); common for HDMI outputs
+  and most microphones.
+- **There is no `Settings` scene.** Settings is a tab. With the Dock icon hidden
+  there is no app menu, so `Cmd+,` and `SettingsLink` would be a dead end.
+- The menu bar popover keeps **Output picker + master level + starred apps +
+  footer**, and no tabs — a dropdown is for a two-second adjustment. The footer
+  has **Open SoundFlow** and **Quit**, and renders even when permission is
+  denied: with the Dock icon hidden it is the only route back into the app, and
+  Quit is the only thing that runs `applicationWillTerminate` and destroys the
+  taps. `openWindow(id: "main")` is followed by `NSApp.activate()`, required in
+  `.accessory` mode.
+
+### Theming
+
+`Theme` is one accent colour and nothing else. `MixerView` resolves the stored
+id from `@AppStorage(Preferences.themeKey)` and applies it **once** at the root
+as `.tint()`, so `Slider`, the star button, `Toggle` and selection states all
+follow with no per-view plumbing. `\.themeAccent` carries the raw `Color` for
+the two places that draw their own shapes — the nav bar highlight and
+`LevelMeter`.
+
+Preset colours are deliberately mid-tone: a colour that reads well on white
+usually washes out on charcoal, so nothing sits at the extremes of lightness.
+`Themes.theme(id:)` falls back to the system accent, so an id from a future
+build degrades quietly rather than losing colour entirely.
+
+`LevelMeter` is three bars driven by `AppMix.level`, which `MixerEngine` has
+been writing every 80 ms all along and nothing displayed. Bar height uses
+`sqrt(level)` because RMS spends most of its time near zero and a linear map
+leaves the bars looking permanently flat.
 
 ### Persistence
 
