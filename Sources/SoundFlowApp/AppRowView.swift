@@ -7,8 +7,11 @@ import SwiftUI
 struct AppRowView: View {
     @Bindable var app: AppMix
     let engine: MixerEngine
-    /// Hidden in the menu bar popover, which is already filtered to stars.
-    var showsFavoriteToggle = true
+    /// The pencil and the star. Both are hidden in the menu bar popover: it is
+    /// already filtered to stars, and editing belongs in the window.
+    var showsRowActions = true
+    /// Raised so the window can host one sheet rather than one per row.
+    var onEdit: (AppMix) -> Void = { _ in }
 
     @State private var isEditingName = false
     @State private var draftName = ""
@@ -37,7 +40,8 @@ struct AppRowView: View {
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
 
-                    if showsFavoriteToggle {
+                    if showsRowActions {
+                        editButton
                         favoriteButton
                     }
                 }
@@ -70,6 +74,7 @@ struct AppRowView: View {
         .opacity(app.isDRMProtected ? 0.5 : (app.isActive ? 1 : 0.65))
         .help(rowHelp)
         .contextMenu {
+            Button("Edit Name & Icon…") { onEdit(app) }
             Button("Rename…") { beginRename() }
             if app.customName != nil {
                 Button("Use Original Name (\(app.name))") { engine.rename(app, to: "") }
@@ -79,6 +84,22 @@ struct AppRowView: View {
                 engine.toggleFavorite(app)
             }
         }
+    }
+
+    /// The discoverable route to renaming, and the only route to the icon.
+    /// Double-clicking the name still works and is left exactly as it was.
+    private var editButton: some View {
+        Button {
+            onEdit(app)
+        } label: {
+            Image(systemName: "pencil")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(width: 16)
+        }
+        .buttonStyle(.borderless)
+        .help("Edit name and icon")
+        .accessibilityLabel("Edit name and icon")
     }
 
     // MARK: - Status
