@@ -78,6 +78,7 @@ struct VersionView: View {
 
                 AboutCard(title: "What's New", symbol: "sparkles") {
                     VStack(alignment: .leading, spacing: 6) {
+                        bullet("A new app icon, drawn from the app's own accent and shapes.")
                         bullet("Sidebar navigation with counted App, Starred and Playing filters.")
                         bullet("Per-app custom icons — keep the real one, or generate a tile.")
                         bullet("Edit an app's name and icon together from the pencil button.")
