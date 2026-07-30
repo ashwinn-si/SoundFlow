@@ -310,13 +310,18 @@ without hopping to the main actor.
   an empty dead end.
 - Sort order is **starred → playing → name**, applied by
   `MixerEngine.sortApps(_:)`. Both the star toggle and a rename re-sort.
-- Both surfaces are the same `MixerView`, switched by `compact`. The star button
-  is hidden in compact mode (`showsFavoriteToggle`) since that list is already
-  filtered.
-- Renaming is inline: double-click the name, or use the row's context menu.
-  Blank input, or input equal to the system name, clears the override rather
-  than storing a duplicate. The system name stays in the tooltip so a renamed
-  row can still be traced back to its process.
+- Both surfaces are the same `MixerView`, switched by `compact`. The pencil and
+  star are hidden in compact mode (`showsRowActions`): that list is already
+  filtered, and editing belongs in the window.
+- Renaming is inline: double-click the name, or use the row's context menu, or
+  the pencil's sheet. Blank input, or input equal to the system name, clears the
+  override rather than storing a duplicate. The system name stays in the tooltip
+  so a renamed row can still be traced back to its process.
+- Icons are per-app. The default is whatever macOS reports; `CustomizeAppSheet`
+  can swap in a tile generated from the bundle id. Hues are quantized to the
+  twelve in `GeneratedIcon.hues` rather than `hash % 360`, because a raw hue
+  lets two apps land a few degrees apart and a near-miss reads as a rendering
+  bug. Display-only — nothing here touches the route.
 - **Starred apps persist through quitting.** `refreshApps()` appends an
   inactive row for every favourite missing from the HAL snapshot, so a
   favourite never disappears from the menu just because it stopped playing.
@@ -381,13 +386,14 @@ pending write, so a level set moments before quitting is not lost.
 | :--- | :--- | :--- |
 | `SoundFlow.appPreferences` | JSON blob `[bundleID: {volume, isMuted}]` | "Reset All Volumes" |
 | `SoundFlow.favoriteApps` | `[String]` | nothing |
-| `SoundFlow.customNames` | `[String: String]` | nothing (per-app, via context menu) |
+| `SoundFlow.customNames` | `[String: String]` | nothing (per-app, via the pencil or context menu) |
+| `SoundFlow.appIconStyles` | JSON blob `[bundleID: {source, hue, isSolid, letters}]` | nothing (per-app, via the pencil). Only customised apps are stored; setting a style back to the default removes the entry. |
 | `SoundFlow.hideDockIcon` | `Bool` | nothing |
 
 Launch-at-login is deliberately **not** in this table. `SMAppService.mainApp` is
 its own source of truth; a mirrored `UserDefaults` flag would drift the moment
 the user toggles the item in System Settings → General → Login Items. The
-toggle in `SettingsView` re-reads the real status on appear, and reverts itself
+toggle in `Sidebar` re-reads the real status on appear, and reverts itself
 if registration throws — which it will for an unsigned or quarantined bundle.
 `status == .requiresApproval` means the user disabled it in System Settings and
 is reported honestly as off.

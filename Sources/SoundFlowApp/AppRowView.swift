@@ -177,17 +177,11 @@ struct AppRowView: View {
         .accessibilityLabel(app.isFavorite ? "Starred" : "Not starred")
     }
 
+    /// The app's own icon, or the tile it was given in the editor. An app with
+    /// no icon at all falls through to a generated tile rather than the grey
+    /// `app.dashed` placeholder this used to draw.
     private var icon: some View {
-        Group {
-            if let image = app.icon {
-                Image(nsImage: image).resizable().interpolation(.high)
-            } else {
-                Image(systemName: "app.dashed")
-                    .resizable()
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .frame(width: 28, height: 28)
+        AppIconView(app: app, style: engine.iconStyle(for: app))
     }
 
     private var muteSymbol: String {
