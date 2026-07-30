@@ -51,6 +51,13 @@ struct MixerView: View {
 
     // MARK: - Main window
 
+    /// A `NavigationSplitView` rather than an `HStack` of two panes.
+    ///
+    /// It is what buys the platform behaviour that a hand-built split cannot:
+    /// the sidebar runs the full height of the window with the traffic lights
+    /// sitting on it, the collapse control appears in the toolbar for free, and
+    /// the title belongs to the real titlebar instead of being body text drawn
+    /// near the top of the content.
     @ViewBuilder
     private var windowLayout: some View {
         if engine.permission == .denied {
@@ -58,40 +65,27 @@ struct MixerView: View {
             // list apps whose sliders do nothing — so it is not drawn at all.
             PermissionView(engine: engine)
         } else {
-            HStack(spacing: 0) {
+            NavigationSplitView {
                 Sidebar(engine: engine, selection: $tab)
-
-                VStack(spacing: 0) {
-                    contentHeader
-                    content
-                }
-                .frame(maxWidth: .infinity)
+                    .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+            } detail: {
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .navigationTitle(tab.title)
+                    .navigationSubtitle(subtitle)
             }
+            .navigationSplitViewStyle(.balanced)
         }
     }
 
-    private var contentHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-            Text(tab.title)
-                .font(.system(size: 16, weight: .semibold))
-            if let subtitle {
-                Text(subtitle)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 15)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
-    }
-
-    private var subtitle: String? {
+    /// Empty rather than `nil`: `navigationSubtitle` takes a `String`, and an
+    /// empty one simply draws nothing.
+    private var subtitle: String {
         switch tab {
         case .allApps: "\(engine.apps.count) apps"
         case .starred: "\(engine.favoriteApps.count) in menu bar"
         case .playing: "\(engine.playingApps.count) making sound"
-        default: nil
+        default: ""
         }
     }
 

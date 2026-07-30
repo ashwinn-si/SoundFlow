@@ -41,9 +41,16 @@ enum MixerTab: String, CaseIterable, Identifiable {
 
 /// Left navigation for the main window.
 ///
-/// Carries more than navigation: the settings that used to fill a whole tab —
-/// theme, the two startup switches, reset — sit here inline, because each is one
-/// control and a tab per control is a tab wasted.
+/// A `List` of `Section`s rather than a hand-built `VStack`. That is not a
+/// stylistic preference: inside a `NavigationSplitView`, `List` supplies the
+/// platform's own sidebar metrics — row height, inset, the gap between a
+/// section header and its rows — and applies them to *every* row, including the
+/// plain `Picker` and `Toggle` controls in Settings. Hand-rolling the stack
+/// meant hand-rolling that rhythm too, and the Settings block ended up visibly
+/// unevenly spaced against the navigation rows above it.
+///
+/// The rail also carries settings that used to occupy a whole tab. Each is one
+/// control, and a tab per control is a tab wasted.
 struct Sidebar: View {
     let engine: MixerEngine
     @Binding var selection: MixerTab
@@ -53,6 +60,7 @@ struct Sidebar: View {
 
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
+    @State private var showResetAlert = false
     /// The value of a programmatic toggle write whose `onChange` has not fired
     /// yet, so it can be recognised and ignored.
     ///
@@ -65,117 +73,27 @@ struct Sidebar: View {
     @Environment(\.themeAccent) private var accent
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 1) {
-                label("Mixer")
-                item(.allApps, count: engine.apps.count)
-                item(.starred, count: engine.favoriteApps.count)
-                item(.playing, count: engine.playingApps.count)
-
-                label("System")
-                item(.devices)
-
-                label("Settings")
-                themeRow
-                launchToggle
-                dockToggle
-                resetButton
-
-                label("About")
-                item(.developer)
-                item(.version)
+        List {
+            Section("Mixer") {
+                row(.allApps, count: engine.apps.count)
+                row(.starred, count: engine.favoriteApps.count)
+                row(.playing, count: engine.playingApps.count)
             }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 10)
-        }
-        .frame(width: 158)
-        .scrollContentBackground(.hidden)
-        // No colour of its own: a neutral dim plus the divider separates the
-        // rail without interrupting the accent wash that crosses both halves.
-        .background(Color.black.opacity(0.05))
-        .overlay(alignment: .trailing) { Divider() }
-        // The user can flip the login item in System Settings, so re-read the
-        // real state rather than trusting the last value shown.
-        .onAppear { syncLaunchToggle(to: LaunchAtLogin.isEnabled) }
-    }
 
-    // MARK: - Navigation
+            Section("System") {
+                row(.devices)
+            }
 
-    private func label(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .kerning(0.6)
-            .textCase(.uppercase)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 8)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
-    }
-
-    private func item(_ tab: MixerTab, count: Int? = nil) -> some View {
-        let isSelected = selection == tab
-
-        return Button {
-            selection = tab
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: tab.symbol)
-                    .font(.system(size: 11))
-                    .frame(width: 14)
-                Text(tab.title)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if let count {
-                    Text("\(count)")
-                        .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.tertiary))
+            Section("Settings") {
+                Picker("Theme", selection: $themeID) {
+                    ForEach(Themes.all) { theme in
+                        Text(theme.name).tag(theme.id)
+                    }
                 }
-            }
-            .foregroundStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.secondary))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(accent.opacity(0.16))
+
+                Toggle(isOn: $launchAtLogin) {
+                    Label("Launch at login", systemImage: "power")
                 }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-
-    // MARK: - Settings
-
-    /// A menu rather than the swatch row the old Settings tab used: at 158pt
-    /// six swatches plus their selection rings do not fit, and the menu shows
-    /// the current theme by name for free.
-    private var themeRow: some View {
-        HStack(spacing: 8) {
-            Text("Theme")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-
-            Picker("Theme", selection: $themeID) {
-                ForEach(Themes.all) { theme in
-                    Text(theme.name).tag(theme.id)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2)
-    }
-
-    private var launchToggle: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Toggle("Launch at login", isOn: $launchAtLogin)
-                .toggleStyle(.checkbox)
-                .font(.system(size: 12))
                 .onChange(of: launchAtLogin) { _, enabled in
                     if pendingProgrammaticValue == enabled {
                         pendingProgrammaticValue = nil
@@ -185,66 +103,81 @@ struct Sidebar: View {
                     applyLaunchAtLogin(enabled)
                 }
 
-            if let launchError {
-                hint(launchError)
-            } else if launchAtLogin && LaunchAtLogin.needsApproval {
-                hint("Approve in System Settings → General → Login Items.")
+                if let launchError {
+                    hint(launchError)
+                } else if launchAtLogin && LaunchAtLogin.needsApproval {
+                    hint("Approve in System Settings → General → Login Items.")
+                }
+
+                Toggle(isOn: $hideDockIcon) {
+                    Label("Hide Dock icon", systemImage: "dock.rectangle")
+                }
+                .onChange(of: hideDockIcon) { _, hidden in
+                    // .accessory removes the Dock icon and the menu bar entry
+                    // stays as the only way in.
+                    NSApp.setActivationPolicy(hidden ? .accessory : .regular)
+                }
+
+                Button(role: .destructive) {
+                    showResetAlert = true
+                } label: {
+                    Label("Reset Volumes", systemImage: "arrow.counterclockwise")
+                        .foregroundStyle(.red)
+                }
+                // Confirmed rather than immediate: it discards every saved
+                // level, and there is no undo.
+                .alert("Reset all volumes?", isPresented: $showResetAlert) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Reset", role: .destructive) { engine.resetAll() }
+                } message: {
+                    Text("Every application goes back to 100% and saved levels "
+                         + "are cleared. Stars and custom names are kept.")
+                }
+            }
+
+            Section("About") {
+                row(.developer)
+                row(.version)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2)
+        // Let the window's accent wash show through instead of the list's own
+        // opaque backing.
+        .scrollContentBackground(.hidden)
+        // The user can flip the login item in System Settings, so re-read the
+        // real state rather than trusting the last value shown.
+        .onAppear { syncLaunchToggle(to: LaunchAtLogin.isEnabled) }
     }
 
-    private var dockToggle: some View {
-        Toggle("Hide Dock icon", isOn: $hideDockIcon)
-            .toggleStyle(.checkbox)
-            .font(.system(size: 12))
-            .onChange(of: hideDockIcon) { _, hidden in
-                // .accessory removes the Dock icon and the menu bar entry stays
-                // as the only way in.
-                NSApp.setActivationPolicy(hidden ? .accessory : .regular)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-    }
+    // MARK: - Navigation rows
 
-    /// Tinted red rather than plain: it discards every saved level, and that is
-    /// worth signalling before the click rather than after.
-    private var resetButton: some View {
+    /// A button rather than `List(selection:)`.
+    ///
+    /// macOS draws native sidebar selection in the *system* accent, which
+    /// ignores the theme the user picked here. Tinting the row background by
+    /// hand is what keeps selection on-theme.
+    @ViewBuilder
+    private func row(_ tab: MixerTab, count: Int? = nil) -> some View {
+        let isSelected = selection == tab
+
         Button {
-            engine.resetAll()
+            selection = tab
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.system(size: 11))
-                    .frame(width: 14)
-                Text("Reset Volumes")
-                    .font(.system(size: 12, weight: .medium))
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.red)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(.red.opacity(0.1))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(.red.opacity(0.28), lineWidth: 1)
-                    }
-            }
-            .contentShape(Rectangle())
+            Label(tab.title, systemImage: tab.symbol)
+                .badge(count ?? 0)
+                .foregroundStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.primary))
+                .tint(isSelected ? accent : .primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Sets every application back to 100% and clears saved levels. "
-              + "Stars and custom names are kept.")
-        .padding(.top, 5)
+        .listRowBackground(isSelected ? accent.opacity(0.16) : .clear)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private func hint(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
 
