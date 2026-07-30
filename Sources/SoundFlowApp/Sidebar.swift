@@ -84,13 +84,12 @@ struct Sidebar: View {
                 row(.devices)
             }
 
-            // Every row here is one shape: leading `Label`, trailing control.
-            // That is what makes the block line up — with itself and with the
-            // navigation rows above, whose icon and text sit at the same two
-            // x positions. A bare `Picker("Theme",…)` puts its title at the
-            // margin with no icon, and a default macOS `Toggle` leads with the
-            // checkbox and pushes the icon inward, so the section had three
-            // different leading edges.
+            // Two columns, held to by every row: a leading glyph, then text.
+            // For the toggles the checkbox *is* the glyph — giving them an icon
+            // as well would push their text out past everything else, which is
+            // what the default style did. Checkbox rather than switch because a
+            // switch costs ~50pt of a 200pt rail and truncated every label to
+            // "Launch…" / "Hide D…".
             Section("Settings") {
                 Picker(selection: $themeID) {
                     ForEach(Themes.all) { theme in
@@ -99,11 +98,10 @@ struct Sidebar: View {
                 } label: {
                     Label("Theme", systemImage: "paintpalette")
                 }
+                .controlSize(.small)
 
-                Toggle(isOn: $launchAtLogin) {
-                    Label("Launch at login", systemImage: "power")
-                }
-                .toggleStyle(.switch)
+                Toggle("Launch at login", isOn: $launchAtLogin)
+                .toggleStyle(.checkbox)
                 .onChange(of: launchAtLogin) { _, enabled in
                     if pendingProgrammaticValue == enabled {
                         pendingProgrammaticValue = nil
@@ -119,10 +117,8 @@ struct Sidebar: View {
                     hint("Approve in System Settings → General → Login Items.")
                 }
 
-                Toggle(isOn: $hideDockIcon) {
-                    Label("Hide Dock icon", systemImage: "dock.rectangle")
-                }
-                .toggleStyle(.switch)
+                Toggle("Hide Dock icon", isOn: $hideDockIcon)
+                .toggleStyle(.checkbox)
                 .onChange(of: hideDockIcon) { _, hidden in
                     // .accessory removes the Dock icon and the menu bar entry
                     // stays as the only way in.

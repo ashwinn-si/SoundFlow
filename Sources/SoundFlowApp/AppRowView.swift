@@ -180,8 +180,17 @@ struct AppRowView: View {
     /// The app's own icon, or the tile it was given in the editor. An app with
     /// no icon at all falls through to a generated tile rather than the grey
     /// `app.dashed` placeholder this used to draw.
+    ///
+    /// Double-click opens the editor, matching the double-click-to-rename on
+    /// the name beside it. Gated on `showsRowActions` for the same reason the
+    /// pencil is: the sheet is far wider than the 320pt popover.
     private var icon: some View {
         AppIconView(app: app, style: engine.iconStyle(for: app))
+            .onTapGesture(count: 2) {
+                guard showsRowActions else { return }
+                onEdit(app)
+            }
+            .help(showsRowActions ? "Double-click to edit name and icon" : "")
     }
 
     private var muteSymbol: String {

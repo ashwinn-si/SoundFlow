@@ -6,14 +6,15 @@ import SwiftUI
 /// Splitting "rename" from "change icon" into two places would mean opening two
 /// things to fix one unhelpful entry like `callservicesd`.
 ///
-/// Reached from the row's pencil and its context menu. The double-click-to-
-/// rename shortcut on the name is untouched — this is the discoverable route to
-/// the same thing, plus the icon.
+/// Reached from the row's pencil, a double-click on its icon, and its context
+/// menu. The double-click-to-rename shortcut on the *name* is untouched — this
+/// is the fuller route to the same thing.
 struct CustomizeAppSheet: View {
     let app: AppMix
     let engine: MixerEngine
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.themeAccent) private var accent
 
     /// Uncommitted, so Cancel is a real cancel.
     @State private var name: String
@@ -28,44 +29,64 @@ struct CustomizeAppSheet: View {
 
     private var isGenerated: Bool { style.source == .generated }
 
-    /// What the row will look like once Done is pressed.
+    /// What the row will show once Done is pressed.
     private var previewName: String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? app.name : trimmed
     }
 
+    private var previewHue: Double {
+        GeneratedIcon.hue(style, bundleID: app.bundleID)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(spacing: 0) {
             header
-            nameField
-            sourcePicker
-            generatedOptions
+            Divider()
+            iconSection
             Divider()
             footer
         }
-        .padding(14)
-        // 400 rather than 320: at 320 the thirteen colour chips wrap to a second
-        // row and push the buttons off the bottom of a minimum-height window.
-        .frame(width: 400)
+        // Wide enough that the thirteen colour chips sit on one line. At 400
+        // they wrapped, which pushed the buttons off a minimum-height window.
+        .frame(width: 440)
     }
 
     // MARK: - Header
 
+    /// Preview and name side by side, over a bloom of the tile's own colour —
+    /// so the thing being edited is the thing you look at first, and changing a
+    /// swatch visibly changes the whole header rather than one small square.
     private var header: some View {
-        HStack(spacing: 13) {
+        HStack(alignment: .top, spacing: 16) {
             preview
+                .background {
+                    if isGenerated {
+                        Circle()
+                            .fill(Color(hue: previewHue / 360, saturation: 0.7, brightness: 0.85))
+                            .frame(width: 96, height: 96)
+                            .blur(radius: 34)
+                            .opacity(0.55)
+                    }
+                }
+                .animation(.easeOut(duration: 0.18), value: previewHue)
+                .animation(.easeOut(duration: 0.18), value: style.source)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(previewName)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
-                Text("Name and icon")
+
+                TextField(app.name, text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12.5))
+
+                Text("Leave empty to use the name macOS reports.")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
-
-            Spacer(minLength: 0)
         }
+        .padding(18)
     }
 
     @ViewBuilder
@@ -74,86 +95,81 @@ struct CustomizeAppSheet: View {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 56, height: 56)
+                .frame(width: 64, height: 64)
         } else {
             GeneratedIconTile(
-                hue: GeneratedIcon.hue(style, bundleID: app.bundleID),
+                hue: previewHue,
                 isSolid: style.isSolid,
                 letters: GeneratedIcon.letters(style, displayName: previewName),
-                size: 56
+                size: 64
             )
         }
     }
 
-    // MARK: - Name
+    // MARK: - Icon
 
-    private var nameField: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            fieldLabel("Name")
-            TextField(app.name, text: $name)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12.5))
-            Text("Leave empty to use the name macOS reports.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    // MARK: - Icon source
-
-    private var sourcePicker: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            fieldLabel("Icon")
+    private var iconSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
             Picker("Icon", selection: $style.source) {
                 Text("App Icon").tag(AppIconSource.appIcon)
                 Text("Generated").tag(AppIconSource.generated)
             }
             .labelsHidden()
             .pickerStyle(.segmented)
+
+            // Label-left / control-right for all three, so they read as one
+            // column instead of three stacked headings.
+            VStack(alignment: .leading, spacing: 11) {
+                field("Style") {
+                    Picker("Style", selection: $style.isSolid) {
+                        Text("Gradient").tag(false)
+                        Text("Solid").tag(true)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 170)
+                }
+
+                field("Colour") {
+                    HStack(spacing: 5) {
+                        automaticSwatch
+                        ForEach(GeneratedIcon.hues, id: \.self) { swatch($0) }
+                    }
+                }
+
+                field("Letters") {
+                    HStack(spacing: 9) {
+                        TextField(GeneratedIcon.automaticLetters(for: previewName),
+                                  text: lettersBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12.5))
+                            .frame(width: 56)
+                        Text("Up to two characters")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            // Disabled rather than hidden: hiding these would make the sheet
+            // change height every time the segment is toggled.
+            .disabled(!isGenerated)
+            .opacity(isGenerated ? 1 : 0.4)
         }
+        .padding(18)
     }
 
-    /// Disabled rather than hidden when the real icon is in use: hiding them
-    /// would make the sheet change height every time the segment is toggled.
-    private var generatedOptions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-                fieldLabel("Style")
-                Picker("Style", selection: $style.isSolid) {
-                    Text("Gradient").tag(false)
-                    Text("Solid").tag(true)
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                fieldLabel("Colour")
-                HStack(spacing: 6) {
-                    automaticSwatch
-                    ForEach(GeneratedIcon.hues, id: \.self) { hue in
-                        swatch(hue)
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                fieldLabel("Letters")
-                HStack(spacing: 10) {
-                    TextField(GeneratedIcon.automaticLetters(for: previewName),
-                              text: lettersBinding)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12.5))
-                        .frame(width: 70)
-                    Text("Up to two characters.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-            }
+    private func field<Control: View>(
+        _ title: String,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(title)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .leading)
+            control()
+            Spacer(minLength: 0)
         }
-        .disabled(!isGenerated)
-        .opacity(isGenerated ? 1 : 0.45)
     }
 
     /// Clamped as it is typed, so the preview can never show more than the tile
@@ -173,11 +189,11 @@ struct CustomizeAppSheet: View {
         } label: {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(.quaternary)
-                .frame(width: 22, height: 22)
+                .frame(width: 21, height: 21)
                 .overlay {
                     Image(systemName: "sparkles")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.secondary))
                 }
                 .overlay { selectionRing(isSelected) }
         }
@@ -194,15 +210,16 @@ struct CustomizeAppSheet: View {
         } label: {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(GeneratedIcon.fill(hue: hue, isSolid: style.isSolid))
-                .frame(width: 22, height: 22)
+                .frame(width: 21, height: 21)
                 .overlay { selectionRing(isSelected) }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Colour \(Int(hue))")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     /// Drawn outside the fill so selection never changes a swatch's apparent
-    /// size — the same reason the old theme swatches did it this way.
+    /// size — the same reason the theme swatches did it this way.
     private func selectionRing(_ isSelected: Bool) -> some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
             .strokeBorder(Color.primary.opacity(isSelected ? 0.85 : 0), lineWidth: 2)
@@ -214,12 +231,13 @@ struct CustomizeAppSheet: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Button("Reset") {
-                // Clears the name and the icon together. "Reset" on a sheet that
-                // edits both would be a lie if it only undid half.
+                // Clears the name and the icon together. "Reset" on a sheet
+                // that edits both would be a lie if it only undid half.
                 engine.rename(app, to: "")
                 engine.setIconStyle(.default, for: app)
                 dismiss()
             }
+            .help("Restore the original name and icon")
 
             Spacer(minLength: 0)
 
@@ -235,13 +253,7 @@ struct CustomizeAppSheet: View {
             }
             .keyboardShortcut(.defaultAction)
         }
-    }
-
-    private func fieldLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .kerning(0.6)
-            .textCase(.uppercase)
-            .foregroundStyle(.tertiary)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
     }
 }

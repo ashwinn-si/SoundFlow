@@ -67,7 +67,7 @@ struct MixerView: View {
         } else {
             NavigationSplitView {
                 Sidebar(engine: engine, selection: $tab)
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 215, max: 280)
             } detail: {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
