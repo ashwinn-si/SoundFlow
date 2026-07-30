@@ -54,12 +54,17 @@ struct MixerState {
     /// Largest absolute input sample seen, before gain. Separates "the tap is
     /// silent" from "our gain or channel mapping zeroed it".
     var lastInputPeak: Float32
+    /// Non-zero while `lastInputPeak` should be computed. Measuring it means
+    /// scanning every sample of input buffer 0 on every callback — real work in
+    /// the real-time path for a number only the diagnostic tools read. Off by
+    /// default; `MixerIOProc.measuresInputPeak` turns it on.
+    var measuresInputPeak: Int32
 
     /// A detached state: no slots, no maps, nothing for the callback to reach.
     static var empty: MixerState {
         MixerState(slots: nil, slotCount: 0, maps: nil, mapCount: 0,
                    callbackCount: 0, lastInputBuffers: 0, lastInputChannels: 0,
-                   lastInputBytes: 0, lastInputPeak: 0)
+                   lastInputBytes: 0, lastInputPeak: 0, measuresInputPeak: 0)
     }
 }
 
@@ -100,21 +105,26 @@ let mixerIOProc: AudioDeviceIOProc = { (
     }
     statePtr.pointee.lastInputChannels = seenChannels
 
-    // Raw input inspection, independent of gain and channel mapping.
+    // Raw input inspection, independent of gain and channel mapping. The peak
+    // scan walks every sample, so it stays behind a flag the diagnostic tools
+    // set — the app itself never reads it and should not pay for it on the
+    // audio thread ~87 times a second.
     if inputBufs.count > 0 {
         let first = inputBufs[0]
         statePtr.pointee.lastInputBytes = Int32(first.mDataByteSize)
-        if let data = first.mData, first.mDataByteSize > 0 {
-            let samples = data.assumingMemoryBound(to: Float32.self)
-            let count = Int(first.mDataByteSize) / MemoryLayout<Float32>.size
-            var peak: Float32 = 0
-            for index in 0..<count {
-                let magnitude = abs(samples[index])
-                if magnitude > peak { peak = magnitude }
+        if state.measuresInputPeak != 0 {
+            if let data = first.mData, first.mDataByteSize > 0 {
+                let samples = data.assumingMemoryBound(to: Float32.self)
+                let count = Int(first.mDataByteSize) / MemoryLayout<Float32>.size
+                var peak: Float32 = 0
+                for index in 0..<count {
+                    let magnitude = abs(samples[index])
+                    if magnitude > peak { peak = magnitude }
+                }
+                statePtr.pointee.lastInputPeak = peak
+            } else {
+                statePtr.pointee.lastInputPeak = 0
             }
-            statePtr.pointee.lastInputPeak = peak
-        } else {
-            statePtr.pointee.lastInputPeak = 0
         }
     }
 
@@ -297,6 +307,7 @@ public final class MixerIOProc: @unchecked Sendable {
 
     private func installStorage(slots: [MixSlot], maps: [ChannelMap]) {
         // Safe because the IOProc is stopped whenever this runs.
+        let wasMeasuringPeak = state.pointee.measuresInputPeak
         releaseStorage()
 
         if !slots.isEmpty {
@@ -319,7 +330,8 @@ public final class MixerIOProc: @unchecked Sendable {
             lastInputBuffers: 0,
             lastInputChannels: 0,
             lastInputBytes: 0,
-            lastInputPeak: 0
+            lastInputPeak: 0,
+            measuresInputPeak: wasMeasuringPeak
         )
         slotCount = slots.count
         mapCount = maps.count
@@ -401,8 +413,23 @@ public final class MixerIOProc: @unchecked Sendable {
         return Float(slots[slot].rms)
     }
 
+    /// Whether the callback computes `diagnostics.inputPeak`.
+    ///
+    /// Off by default: the measurement scans every sample of the first input
+    /// buffer on every callback, which is real work on the real-time thread for
+    /// a number nothing in the app reads. The spike CLI, `SelfTest` and
+    /// `TapPermission.verifyAudioFlows` turn it on because it is exactly what
+    /// separates "the tap is silent" from "our gain zeroed it".
+    public var measuresInputPeak: Bool {
+        get { state.pointee.measuresInputPeak != 0 }
+        set {
+            state.pointee.measuresInputPeak = newValue ? 1 : 0
+            if !newValue { state.pointee.lastInputPeak = 0 }
+        }
+    }
+
     /// Diagnostics for distinguishing "IO never started" from "IO running but
-    /// the tap is silent".
+    /// the tap is silent". `inputPeak` reads 0 unless `measuresInputPeak` is set.
     public var diagnostics: (callbacks: UInt64, inputBuffers: Int, inputChannels: Int,
                              inputBytes: Int, inputPeak: Float) {
         (state.pointee.callbackCount,

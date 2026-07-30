@@ -110,6 +110,7 @@ final class MixerEngine {
 
     var masterVolume: Float = 1.0 {
         didSet {
+            guard !isReadingDeviceVolume else { return }
             guard abs(masterVolume - oldValue) > 0.0001 else { return }
             deviceManager.setMasterVolume(masterVolume, deviceID: outputDeviceID)
         }
@@ -121,12 +122,20 @@ final class MixerEngine {
     /// because the same selectors address playback and capture by scope.
     var inputVolume: Float = 1.0 {
         didSet {
+            guard !isReadingDeviceVolume else { return }
             guard abs(inputVolume - oldValue) > 0.0001 else { return }
             deviceManager.setMasterVolume(inputVolume,
                                           deviceID: inputDeviceID,
                                           scope: kAudioObjectPropertyScopeInput)
         }
     }
+
+    /// Set while a device's own level is being copied *into* the published
+    /// property. Without it the `didSet` immediately writes the value back to
+    /// the hardware, so simply refreshing the device list — which the HAL can
+    /// trigger at any time — stomps the level the user set elsewhere, and a
+    /// device with no readable volume gets forced to 100%.
+    private var isReadingDeviceVolume = false
 
     /// Plenty of microphones expose no settable gain, so the slider hides.
     var hasInputVolumeControl: Bool = true
@@ -142,7 +151,10 @@ final class MixerEngine {
     private var routedApps: [AppMix] = []
     private var taps: [ProcessTap] = []
 
-    private var outputDeviceID: AudioObjectID = kAudioObjectUnknown
+    /// Readable by the UI so the output picker can match on identity rather than
+    /// on a display name, which is not unique across devices — two identical
+    /// USB interfaces report the same name.
+    private(set) var outputDeviceID: AudioObjectID = kAudioObjectUnknown
     private var outputDeviceUID: String?
     /// Readable by the UI so the input picker can match on identity rather than
     /// on a display name, which is not unique across devices.
@@ -153,6 +165,14 @@ final class MixerEngine {
     private var customNames: [String: String] = [:]
     private var meterTimer: Timer?
     private var started = false
+    /// Coalesces `UserDefaults` writes: a slider drag calls `persist` on every
+    /// frame, and each call re-encodes the whole preference blob.
+    private var preferenceSaveTask: Task<Void, Never>?
+    /// Recovery attempts carried across watchdog-driven rebuilds. Each rebuild
+    /// produces a fresh `RouteWatchdog`, so the budget has to live out here or
+    /// `maxRecoveryAttempts` never bites.
+    private var routeRecoveryAttempts = 0
+    private var sleepWakeObservers: [NSObjectProtocol] = []
 
     // MARK: - Lifecycle
 
@@ -181,26 +201,80 @@ final class MixerEngine {
         deviceManager.onDeviceListChanged = { [weak self] in
             Task { @MainActor in self?.refreshDevices() }
         }
+        // Choosing a different existing device in Control Center changes no
+        // device list, so without these the route keeps feeding the old device.
+        deviceManager.onDefaultOutputChanged = { [weak self] in
+            Task { @MainActor in self?.refreshOutputState() }
+        }
+        deviceManager.onDefaultInputChanged = { [weak self] in
+            Task { @MainActor in self?.refreshInputState() }
+        }
         deviceManager.startMonitoringDeviceChanges()
 
-        meterTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.updateMeters() }
-        }
+        observeSleepWake()
     }
 
     func stop() {
-        meterTimer?.invalidate()
-        meterTimer = nil
+        stopMetering()
         registry.stopMonitoring()
         deviceManager.stopMonitoringDeviceChanges()
+
+        let center = NSWorkspace.shared.notificationCenter
+        sleepWakeObservers.forEach(center.removeObserver(_:))
+        sleepWakeObservers = []
+
         teardownRoute()
+        flushPreferences()
         started = false
+    }
+
+    // MARK: - Sleep / wake
+
+    /// Taps routinely come back from sleep in the zero-buffer state. The
+    /// watchdog would catch it, but only after three seconds of silence — and
+    /// only if something is playing. Rebuilding on wake makes the recovery
+    /// immediate, and dropping the route on sleep means no tap is left holding
+    /// an app muted while the machine is suspended.
+    private func observeSleepWake() {
+        let center = NSWorkspace.shared.notificationCenter
+        sleepWakeObservers = [
+            // Synchronous, not a `Task` hop: the system does not wait for our
+            // queue to drain before suspending, and a teardown that lands after
+            // sleep is a teardown that did not happen.
+            center.addObserver(forName: NSWorkspace.willSleepNotification,
+                               object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.teardownRoute() }
+            },
+            center.addObserver(forName: NSWorkspace.didWakeNotification,
+                               object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.handleWake() }
+            }
+        ]
+    }
+
+    private func handleWake() {
+        // Devices come and go across a sleep (a dock, a Bluetooth headset), so
+        // re-read them before deciding what the route should contain.
+        teardownRoute()
+        routeRecoveryAttempts = 0
+        refreshDevices()
+        refreshApps()
     }
 
     // MARK: - Permission
 
+    /// Re-reads TCC state, and builds the route if the answer just became yes.
+    ///
+    /// Called whenever the app activates, which is how a user returning from
+    /// System Settings gets working sliders. Without the `syncRoute()` the UI
+    /// unblocked but no tap was ever created until the process list happened to
+    /// change — the app looked granted and did nothing.
     func refreshPermission() {
+        let previous = permission
         permission = TapPermission.status()
+        guard permission == .granted, previous != .granted else { return }
+        routeRecoveryAttempts = 0
+        syncRoute()
     }
 
     /// Raises the system prompt on first launch. Once macOS has been answered
@@ -220,31 +294,42 @@ final class MixerEngine {
         let all = deviceManager.getAllDevices()
         outputDevices = all.filter(\.isOutput)
         inputDevices = all.filter(\.isInput)
+        refreshOutputState()
         refreshInputState()
+    }
 
+    func selectOutputDevice(_ device: AudioDeviceItem) {
+        deviceManager.setDefaultDevice(device.id, isInput: false)
+        refreshOutputState()
+    }
+
+    func selectInputDevice(_ device: AudioDeviceItem) {
+        deviceManager.setDefaultDevice(device.id, isInput: true)
+        refreshInputState()
+    }
+
+    /// Re-reads the default playback device and its level, rebuilding the route
+    /// when the device actually changed.
+    ///
+    /// Keyed on the device **UID**, not the `AudioObjectID`: ids are recycled
+    /// when hardware comes and goes, so an unplug/replug can hand back the same
+    /// number for a different device.
+    private func refreshOutputState() {
         let previousUID = outputDeviceUID
         outputDeviceID = deviceManager.getDefaultOutputDeviceID() ?? kAudioObjectUnknown
         outputDeviceUID = caDeviceUID(outputDeviceID)
         outputDeviceName = outputDevices.first { $0.id == outputDeviceID }?.name ?? "Unknown"
 
         hasMasterVolumeControl = deviceManager.hasSettableVolume(deviceID: outputDeviceID)
-        masterVolume = deviceManager.getMasterVolume(deviceID: outputDeviceID) ?? 1.0
+        readDeviceVolume {
+            masterVolume = deviceManager.getMasterVolume(deviceID: outputDeviceID) ?? 1.0
+        }
 
         // Everything routed through the old device has to be rebuilt.
-        if previousUID != nil && previousUID != outputDeviceUID {
-            teardownRoute()
-            syncRoute()
-        }
-    }
-
-    func selectOutputDevice(_ device: AudioDeviceItem) {
-        deviceManager.setDefaultDevice(device.id, isInput: false)
-        refreshDevices()
-    }
-
-    func selectInputDevice(_ device: AudioDeviceItem) {
-        deviceManager.setDefaultDevice(device.id, isInput: true)
-        refreshInputState()
+        guard previousUID != outputDeviceUID else { return }
+        teardownRoute()
+        routeRecoveryAttempts = 0
+        syncRoute()
     }
 
     /// Re-reads the default capture device and its gain. Split out so switching
@@ -255,8 +340,18 @@ final class MixerEngine {
 
         hasInputVolumeControl = deviceManager.hasSettableVolume(
             deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput)
-        inputVolume = deviceManager.getMasterVolume(
-            deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput) ?? 1.0
+        readDeviceVolume {
+            inputVolume = deviceManager.getMasterVolume(
+                deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput) ?? 1.0
+        }
+    }
+
+    /// Copies a hardware level into a published property without the `didSet`
+    /// bouncing it straight back to the hardware.
+    private func readDeviceVolume(_ body: () -> Void) {
+        isReadingDeviceVolume = true
+        defer { isReadingDeviceVolume = false }
+        body()
     }
 
     // MARK: - App list
@@ -265,6 +360,10 @@ final class MixerEngine {
         let snapshot = registry.snapshot()
         var seen = Set<String>()
         var updated: [AppMix] = []
+        // Built once: this method runs on every HAL process-list change, and a
+        // linear scan per process made it quadratic in the number of apps.
+        let existingByBundle = Dictionary(apps.map { ($0.bundleID, $0) },
+                                          uniquingKeysWith: { first, _ in first })
 
         for process in snapshot {
             guard let bundleID = process.bundleID else { continue }
@@ -275,7 +374,7 @@ final class MixerEngine {
             guard let descriptor = describe(process: process, bundleID: bundleID) else { continue }
             seen.insert(bundleID)
 
-            if let existing = apps.first(where: { $0.bundleID == bundleID }) {
+            if let existing = existingByBundle[bundleID] {
                 existing.refresh(pid: process.pid,
                                  processObjectID: process.processObjectID,
                                  isPlaying: process.isRunningOutput)
@@ -300,8 +399,7 @@ final class MixerEngine {
         // as inactive rows. Without this a favourite vanishes the moment it
         // stops playing, which makes the menu bar look broken.
         for bundleID in favorites where !seen.contains(bundleID) {
-            let existing = apps.first { $0.bundleID == bundleID }
-            if let existing {
+            if let existing = existingByBundle[bundleID] {
                 existing.markInactive()
                 updated.append(existing)
                 continue
@@ -390,6 +488,8 @@ final class MixerEngine {
             app.volume = 1.0
             app.isMuted = false
         }
+        preferenceSaveTask?.cancel()
+        preferenceSaveTask = nil
         Preferences.clear()
         preferences = [:]
         syncRoute()
@@ -397,6 +497,28 @@ final class MixerEngine {
 
     private func persist(_ app: AppMix) {
         preferences[app.bundleID] = AppPreference(volume: app.volume, isMuted: app.isMuted)
+        schedulePreferenceSave()
+    }
+
+    /// Coalesces writes. A slider drag calls `persist` on every frame, and each
+    /// save re-encodes the whole blob to JSON on the main thread; the last value
+    /// is the only one that matters.
+    private func schedulePreferenceSave() {
+        preferenceSaveTask?.cancel()
+        preferenceSaveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, let self else { return }
+            self.preferenceSaveTask = nil
+            Preferences.save(self.preferences)
+        }
+    }
+
+    /// Writes any pending change immediately. Called on teardown so a level set
+    /// moments before quitting is not lost with the cancelled task.
+    private func flushPreferences() {
+        guard preferenceSaveTask != nil else { return }
+        preferenceSaveTask?.cancel()
+        preferenceSaveTask = nil
         Preferences.save(preferences)
     }
 
@@ -456,7 +578,13 @@ final class MixerEngine {
     // MARK: - Route management
 
     /// Rebuilds the route so it contains exactly the apps that need a tap.
-    private func syncRoute() {
+    ///
+    /// - Parameter preservingRecoveryBudget: `true` only for a watchdog-driven
+    ///   rebuild. Every other caller represents a real change in circumstances
+    ///   (the user moved a slider, a device appeared, the machine woke) and
+    ///   deserves a fresh set of recovery attempts.
+    private func syncRoute(preservingRecoveryBudget: Bool = false) {
+        if !preservingRecoveryBudget { routeRecoveryAttempts = 0 }
         guard permission != .denied else { return }
 
         let wanted = apps.filter(\.needsTap)
@@ -516,6 +644,7 @@ final class MixerEngine {
         routedApps = newApps
         routeError = nil
         applyAllGains()
+        startMetering()
 
         let monitor = RouteWatchdog(route: newRoute) { [weak self] in
             // Reading @MainActor state from the watchdog thread would be unsafe,
@@ -525,7 +654,10 @@ final class MixerEngine {
         monitor.onNeedsRebuild = { [weak self] in
             Task { @MainActor in self?.rebuildRoute() }
         }
-        monitor.start()
+        monitor.onGaveUp = { [weak self] in
+            Task { @MainActor in self?.abandonRoute() }
+        }
+        monitor.start(carryingOverAttempts: routeRecoveryAttempts)
         watchdog = monitor
     }
 
@@ -538,9 +670,23 @@ final class MixerEngine {
     }
 
     private func rebuildRoute() {
+        // The replacement route gets a new watchdog, so carry the spent budget
+        // across by hand — otherwise a permanently dead pipeline is torn down
+        // and rebuilt every three seconds for as long as the app runs.
+        routeRecoveryAttempts = watchdog?.recoveryAttempts ?? routeRecoveryAttempts
         teardownRoute()
-        syncRoute()
+        syncRoute(preservingRecoveryBudget: true)
         watchdog?.noteRebuilt()
+    }
+
+    /// Every recovery attempt failed. Dropping the route is the safe end state:
+    /// without a tap the apps play natively at full volume, which is audible and
+    /// obviously wrong rather than silent and mysterious.
+    private func abandonRoute() {
+        teardownRoute()
+        routeRecoveryAttempts = 0
+        routeError = "Audio routing stopped responding and was disabled. "
+            + "Adjust a level to try again."
     }
 
     private func teardownRoute() {
@@ -551,6 +697,7 @@ final class MixerEngine {
         taps.forEach { $0.destroy() }
         taps = []
         routedApps = []
+        stopMetering()
     }
 
     // MARK: - Meters
@@ -558,14 +705,36 @@ final class MixerEngine {
     /// Cached so the watchdog thread never touches main-actor state.
     private let cachedExpectingAudio = OSAllocatedUnfairLock(initialState: false)
 
+    /// The meter timer runs only while a route exists.
+    ///
+    /// It used to be started unconditionally in `start()` and never stopped, so
+    /// an idle SoundFlow paid 12.5 Hz of timer — and 12.5 Hz of `@Observable`
+    /// mutation — forever, with no route to meter and nothing on screen. Idle
+    /// wakeups are what drain a battery overnight; this was the app's floor.
+    private func startMetering() {
+        guard meterTimer == nil else { return }
+        meterTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateMeters() }
+        }
+    }
+
+    private func stopMetering() {
+        meterTimer?.invalidate()
+        meterTimer = nil
+        cachedExpectingAudio.withLock { $0 = false }
+        for app in apps where app.level != 0 { app.level = 0 }
+    }
+
     private func updateMeters() {
         guard let ioProc = route?.ioProc else {
-            for app in apps where app.level != 0 { app.level = 0 }
-            cachedExpectingAudio.withLock { $0 = false }
+            stopMetering()
             return
         }
         for (index, app) in routedApps.enumerated() {
-            app.level = ioProc.rms(slot: index)
+            let level = ioProc.rms(slot: index)
+            // Writing an unchanged value still invalidates every row observing
+            // it. At 12.5 Hz that is a redraw of the whole list for nothing.
+            if abs(app.level - level) > 0.002 { app.level = level }
         }
         let expecting = routedApps.contains { $0.isPlaying && !$0.isMuted && $0.volume > 0.01 }
         cachedExpectingAudio.withLock { $0 = expecting }

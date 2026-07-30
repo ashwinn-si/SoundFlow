@@ -63,8 +63,8 @@ what destroys the live taps.
 | `ProcessTapEngine.swift` | `ProcessTap` create/destroy, `TapError` classification, orphan sweeping. |
 | `AggregateRoute.swift` | Private aggregate device: taps in, one physical output out. |
 | `MixerIOProc.swift` | The real-time callback. Channel mapping, gain, mixing, RMS. |
-| `RouteWatchdog.swift` | Detects the zero-buffer failure and asks the owner to rebuild. |
-| `AudioDeviceManager.swift` | Device enumeration, default-device changes, volume/mute. Volume and mute take a `scope:` — the same selectors address playback and capture. |
+| `RouteWatchdog.swift` | Detects the zero-buffer failure and asks the owner to rebuild. Counters are lock-guarded; the recovery budget is seeded by the owner. |
+| `AudioDeviceManager.swift` | Device enumeration, device-list **and default-output/input** listeners, volume/mute. Volume and mute take a `scope:` — the same selectors address playback and capture. |
 | `TapPermission.swift` | TCC state. Screen-capture preflight, **not** tap success. |
 | `Sources/SoundFlowApp/` | The app. |
 | `MixerEngine.swift` | `@MainActor @Observable`. Owns `AppMix` list, prefs, and the route. The only place that decides what gets tapped. |
@@ -141,6 +141,42 @@ or a crash — rarely a compile error.
 10. **`applicationWillTerminate` must destroy the route.** It is the only thing
     standing between a quit and permanently muted apps.
 
+11. **The engine starts from `AppDelegate`, never a view's `.task`.** SwiftUI
+    does not guarantee the `Window` scene's content exists at launch — with the
+    Dock icon hidden and launch-at-login on, it usually does not. Starting from
+    the main window meant saved levels were not applied, the menu bar was empty,
+    and the delegate had no engine to tear taps down with. `AppDelegate` owns
+    the `MixerEngine`; the scenes read it.
+
+12. **The recovery budget must outlive the watchdog.** A rebuild destroys the
+    route and therefore its `RouteWatchdog`, so `maxRecoveryAttempts` only means
+    anything if `MixerEngine.routeRecoveryAttempts` carries the count into
+    `start(carryingOverAttempts:)`. Reset it for a real change of circumstances,
+    not for a watchdog-driven rebuild — that is what
+    `syncRoute(preservingRecoveryBudget:)` is for. Without the hand-off a dead
+    pipeline rebuilds every three seconds forever.
+
+13. **Watch the default-device selectors, not just the device list.** Choosing a
+    different *existing* output in Control Center adds and removes nothing, so
+    `kAudioHardwarePropertyDevices` never fires. `AudioDeviceManager` also
+    listens on `kAudioHardwarePropertyDefaultOutputDevice` and
+    `…DefaultInputDevice`. Device identity is compared by **UID**: ids get
+    recycled as hardware comes and goes.
+
+14. **Reading a device's level must not write it back.** `masterVolume` and
+    `inputVolume` push to the hardware in `didSet`, so copying a device's own
+    level into them re-writes it — and a device with no readable volume gets
+    forced to 100%. Every such read goes through `readDeviceVolume { }`.
+
+15. **Selection binds to `AudioObjectID`, never to a device name.** Names are not
+    unique (two identical interfaces) and can read "Unknown", which leaves the
+    picker blank.
+
+16. **Permission granted while running must call `syncRoute()`.**
+    `refreshPermission()` runs on every activation; without the sync the UI
+    unblocks after the user returns from System Settings and the sliders do
+    nothing until the process list happens to change.
+
 ---
 
 ## Where changes go
@@ -155,7 +191,8 @@ or a crash — rarely a compile error.
 | Change login-item behaviour | `LaunchAtLogin.swift` — needs a signed bundle to register |
 | Change the volume curve | `MixerIOProc.setVolume(slot:sliderValue:)` — currently squared |
 | Change tap/route lifecycle | `MixerEngine.syncRoute()` — the single decision point |
-| Debug "no audio" | `MixerIOProc.diagnostics`, then `./scripts/run-spike.sh --selftest` |
+| React to a new system event | Add a listener in `AudioDeviceManager`, route it into `MixerEngine` — see the trigger table in `docs/ARCHITECTURE.md` §2 |
+| Debug "no audio" | `MixerIOProc.diagnostics` (set `measuresInputPeak` first), then `./scripts/run-spike.sh --selftest` |
 
 Adding a field to `AppPreference` breaks decoding of every saved blob —
 synthesised `Codable` ignores property defaults for missing keys and

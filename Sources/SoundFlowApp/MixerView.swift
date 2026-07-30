@@ -201,9 +201,12 @@ struct MixerView: View {
         .padding(.vertical, 8)
     }
 
+    /// Matched on device id, not name: two identical USB interfaces report the
+    /// same name, and a name lookup then selects whichever came first — or
+    /// nothing at all when the name reads "Unknown", leaving the picker blank.
     private var outputSelection: Binding<AudioObjectID> {
         Binding(
-            get: { engine.outputDevices.first { $0.name == engine.outputDeviceName }?.id ?? 0 },
+            get: { engine.outputDeviceID },
             set: { newID in
                 if let device = engine.outputDevices.first(where: { $0.id == newID }) {
                     engine.selectOutputDevice(device)

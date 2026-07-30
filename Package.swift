@@ -47,7 +47,9 @@ let package = Package(
             dependencies: ["SoundFlowCore"],
             path: "Sources/SoundFlowApp",
             exclude: [
-                "Resources/Info.plist"
+                "Resources/Info.plist",
+                // Source art for the .icns; build.sh only ships the compiled icon.
+                "Resources/AppIcon.png"
             ],
             resources: [
                 .process("Resources/AppIcon.icns")

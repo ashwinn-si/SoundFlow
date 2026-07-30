@@ -148,69 +148,99 @@ public class AudioDeviceManager: @unchecked Sendable {
 
     /// Callback fired on the main queue whenever audio devices are added or removed.
     public var onDeviceListChanged: (@Sendable () -> Void)?
+    /// Fired on the main queue when the *system default output* changes.
+    ///
+    /// Distinct from `onDeviceListChanged`: picking a different existing device
+    /// in Control Center or the Sound pane does not add or remove anything, so
+    /// the device-list listener never fires for it. Without this the route keeps
+    /// feeding the old device and the picker shows a stale selection.
+    public var onDefaultOutputChanged: (@Sendable () -> Void)?
+    /// Fired on the main queue when the system default *input* changes.
+    public var onDefaultInputChanged: (@Sendable () -> Void)?
 
-    private var isListening = false
-    /// Retained `self` handed to the C listener; released when the listener goes.
+    /// The hardware properties worth watching, all on the system object.
+    private static let monitoredSelectors: [AudioObjectPropertySelector] = [
+        kAudioHardwarePropertyDevices,
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioHardwarePropertyDefaultInputDevice
+    ]
+
+    /// Retained `self` handed to the C listener; released when the listeners go.
     private var listenerContext: UnsafeMutableRawPointer?
+    /// Selectors actually registered, so a partial failure still unwinds cleanly.
+    private var registeredSelectors: [AudioObjectPropertySelector] = []
+    private let listenerLock = NSLock()
 
-    /// Start listening for HAL device add/remove events.
-    /// Safe to call multiple times; installs the listener only once.
+    /// Start listening for HAL device add/remove and default-device events.
+    /// Safe to call multiple times; installs the listeners only once.
     public func startMonitoringDeviceChanges() {
-        guard !isListening else { return }
-        isListening = true
+        listenerLock.lock()
+        defer { listenerLock.unlock() }
+        guard listenerContext == nil else { return }
 
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        // `self` crosses into C as an opaque pointer. This retain is balanced by
-        // the release in stopMonitoringDeviceChanges().
+        // `self` crosses into C as an opaque pointer. This single retain covers
+        // every registration below and is balanced in stopMonitoringDeviceChanges().
         let selfPtr = Unmanaged.passRetained(self).toOpaque()
-        listenerContext = selfPtr
 
-        let status = AudioObjectAddPropertyListener(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            deviceListListener,
-            selfPtr
-        )
-
-        if status != noErr {
-            print("[AudioDeviceManager] Failed to add device-list listener: \(status)")
-            Unmanaged<AudioDeviceManager>.fromOpaque(selfPtr).release()
-            listenerContext = nil
-            isListening = false
+        var registered: [AudioObjectPropertySelector] = []
+        for selector in Self.monitoredSelectors {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            let status = AudioObjectAddPropertyListener(
+                AudioObjectID(kAudioObjectSystemObject), &address, hardwareListener, selfPtr)
+            if status == noErr {
+                registered.append(selector)
+            } else {
+                print("[AudioDeviceManager] Failed to observe \(selector): \(status)")
+            }
         }
+
+        guard !registered.isEmpty else {
+            Unmanaged<AudioDeviceManager>.fromOpaque(selfPtr).release()
+            return
+        }
+        listenerContext = selfPtr
+        registeredSelectors = registered
     }
 
-    /// Stop listening for device changes, removing the listener and balancing
-    /// its retain. The previous implementation did neither, so every start/stop
-    /// cycle leaked the manager and left a live callback behind.
+    /// Stop listening, removing every listener and balancing its retain. The
+    /// original implementation did neither, so each start/stop cycle leaked the
+    /// manager and left a live callback behind.
     public func stopMonitoringDeviceChanges() {
-        guard isListening, let selfPtr = listenerContext else { return }
-        isListening = false
+        listenerLock.lock()
+        defer { listenerLock.unlock() }
+        guard let selfPtr = listenerContext else { return }
 
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectRemovePropertyListener(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            deviceListListener,
-            selfPtr
-        )
+        for selector in registeredSelectors {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            AudioObjectRemovePropertyListener(
+                AudioObjectID(kAudioObjectSystemObject), &address, hardwareListener, selfPtr)
+        }
+        registeredSelectors = []
+        listenerContext = nil
 
         Unmanaged<AudioDeviceManager>.fromOpaque(selfPtr).release()
-        listenerContext = nil
     }
 
-    fileprivate func notifyDeviceListChanged() {
-        let handler = onDeviceListChanged
-        DispatchQueue.main.async { handler?() }
+    /// Routes a HAL notification to the matching callback. Runs on a HAL thread,
+    /// so it only hops to main and returns.
+    fileprivate func notify(selector: AudioObjectPropertySelector) {
+        let handler: (@Sendable () -> Void)?
+        switch selector {
+        case kAudioHardwarePropertyDevices:             handler = onDeviceListChanged
+        case kAudioHardwarePropertyDefaultOutputDevice: handler = onDefaultOutputChanged
+        case kAudioHardwarePropertyDefaultInputDevice:  handler = onDefaultInputChanged
+        default:                                        return
+        }
+        guard let handler else { return }
+        DispatchQueue.main.async { handler() }
     }
 
     // MARK: - Master Volume Control
@@ -348,31 +378,16 @@ public class AudioDeviceManager: @unchecked Sendable {
     }
 
     // MARK: - Private Helpers
-    private func getDeviceStringProperty(deviceID: AudioObjectID, selector: AudioObjectPropertySelector) -> String? {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: selector,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        
-        var stringRef: Unmanaged<CFString>? = nil
-        var dataSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &propertyAddress,
-            0,
-            nil,
-            &dataSize,
-            &stringRef
-        )
-        
-        if status == noErr, let unmanagedStr = stringRef {
-            return unmanagedStr.takeUnretainedValue() as String
-        }
-        return nil
+
+    /// CoreAudio hands CFString properties back at +1. Reading them through
+    /// `caString` takes that ownership; the previous `takeUnretainedValue()`
+    /// leaked a string per device per read, and `getAllDevices()` runs on every
+    /// HAL device change.
+    private func getDeviceStringProperty(deviceID: AudioObjectID,
+                                         selector: AudioObjectPropertySelector) -> String? {
+        caString(deviceID, caAddress(selector))
     }
-    
+
     private func getDeviceTransportType(deviceID: AudioObjectID) -> String {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyTransportType,
@@ -406,45 +421,12 @@ public class AudioDeviceManager: @unchecked Sendable {
         }
     }
     
-    private func checkDeviceHasChannels(deviceID: AudioObjectID, scope: AudioObjectPropertyScope) -> Bool {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreamConfiguration,
-            mScope: scope,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        
-        var dataSize: UInt32 = 0
-        let status = AudioObjectGetPropertyDataSize(
-            deviceID,
-            &propertyAddress,
-            0,
-            nil,
-            &dataSize
-        )
-        
-        guard status == noErr, dataSize > 0 else { return false }
-        
-        let rawBufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: Int(dataSize))
-        defer { rawBufferList.deallocate() }
-        
-        let getStatus = AudioObjectGetPropertyData(
-            deviceID,
-            &propertyAddress,
-            0,
-            nil,
-            &dataSize,
-            rawBufferList
-        )
-        
-        guard getStatus == noErr else { return false }
-        
-        let buffers = UnsafeMutableAudioBufferListPointer(rawBufferList)
-        var totalChannels: UInt32 = 0
-        for buffer in buffers {
-            totalChannels += buffer.mNumberChannels
-        }
-        
-        return totalChannels > 0
+    /// Shares `caStreamBuffers`' byte-exact allocation. The previous version
+    /// allocated `dataSize` whole `AudioBufferList` structs — a ~24× over-read
+    /// of the required size, per device, per scope, on every enumeration.
+    private func checkDeviceHasChannels(deviceID: AudioObjectID,
+                                        scope: AudioObjectPropertyScope) -> Bool {
+        caChannelCount(deviceID, scope: scope) > 0
     }
 }
 
@@ -452,10 +434,14 @@ public class AudioDeviceManager: @unchecked Sendable {
 
 /// File-scope so the function pointer is stable: `AudioObjectRemovePropertyListener`
 /// only matches a listener registered with the identical pointer.
-private let deviceListListener: AudioObjectPropertyListenerProc = { _, _, _, clientData in
+///
+/// One proc serves all three watched properties; the changed addresses arrive as
+/// arguments, so the selector is what decides which callback fires.
+private let hardwareListener: AudioObjectPropertyListenerProc = { _, count, addresses, clientData in
     guard let clientData else { return noErr }
-    Unmanaged<AudioDeviceManager>.fromOpaque(clientData)
-        .takeUnretainedValue()
-        .notifyDeviceListChanged()
+    let manager = Unmanaged<AudioDeviceManager>.fromOpaque(clientData).takeUnretainedValue()
+    for index in 0..<Int(count) {
+        manager.notify(selector: addresses[index].mSelector)
+    }
     return noErr
 }

@@ -71,6 +71,9 @@ public enum TapPermission {
         let route = AggregateRoute(outputDeviceUID: outputDeviceUID)
         defer { route.destroy() }
         guard route.start(taps: [tap]), let ioProc = route.ioProc else { return false }
+        // The whole point of this check is the raw input peak, which the app
+        // leaves off so the audio thread does not scan every sample.
+        ioProc.measuresInputPeak = true
 
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
