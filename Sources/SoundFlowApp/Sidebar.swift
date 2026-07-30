@@ -84,32 +84,28 @@ struct Sidebar: View {
                 row(.devices)
             }
 
-            // Two columns, held to by every row: a leading glyph, then text.
-            // For the toggles the checkbox *is* the glyph — giving them an icon
-            // as well would push their text out past everything else, which is
-            // what the default style did. Checkbox rather than switch because a
-            // switch costs ~50pt of a 200pt rail and truncated every label to
-            // "Launch…" / "Hide D…".
             Section("Settings") {
-                Picker(selection: $themeID) {
-                    ForEach(Themes.all) { theme in
-                        Text(theme.name).tag(theme.id)
+                HStack(spacing: Self.glyphGap) {
+                    glyph("paintpalette")
+                    Picker(selection: $themeID) {
+                        ForEach(Themes.all) { theme in
+                            Text(theme.name).tag(theme.id)
+                        }
+                    } label: {
+                        Text("Theme")
                     }
-                } label: {
-                    Label("Theme", systemImage: "paintpalette")
+                    .controlSize(.small)
                 }
-                .controlSize(.small)
 
-                Toggle("Launch at login", isOn: $launchAtLogin)
-                .toggleStyle(.checkbox)
-                .onChange(of: launchAtLogin) { _, enabled in
-                    if pendingProgrammaticValue == enabled {
+                checkRow("Launch at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, enabled in
+                        if pendingProgrammaticValue == enabled {
+                            pendingProgrammaticValue = nil
+                            return
+                        }
                         pendingProgrammaticValue = nil
-                        return
+                        applyLaunchAtLogin(enabled)
                     }
-                    pendingProgrammaticValue = nil
-                    applyLaunchAtLogin(enabled)
-                }
 
                 if let launchError {
                     hint(launchError)
@@ -117,21 +113,23 @@ struct Sidebar: View {
                     hint("Approve in System Settings → General → Login Items.")
                 }
 
-                Toggle("Hide Dock icon", isOn: $hideDockIcon)
-                .toggleStyle(.checkbox)
-                .onChange(of: hideDockIcon) { _, hidden in
-                    // .accessory removes the Dock icon and the menu bar entry
-                    // stays as the only way in.
-                    NSApp.setActivationPolicy(hidden ? .accessory : .regular)
-                }
+                checkRow("Hide Dock icon", isOn: $hideDockIcon)
+                    .onChange(of: hideDockIcon) { _, hidden in
+                        // .accessory removes the Dock icon and the menu bar
+                        // entry stays as the only way in.
+                        NSApp.setActivationPolicy(hidden ? .accessory : .regular)
+                    }
 
                 Button(role: .destructive) {
                     showResetAlert = true
                 } label: {
-                    Label("Reset Volumes", systemImage: "arrow.counterclockwise")
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                    HStack(spacing: Self.glyphGap) {
+                        glyph("arrow.counterclockwise")
+                        Text("Reset Volumes")
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(.red)
+                    .contentShape(Rectangle())
                 }
                 // .plain, so it draws as a row like everything else. The
                 // default button background made it a filled pill inset from
@@ -161,6 +159,52 @@ struct Sidebar: View {
         .onAppear { syncLaunchToggle(to: LaunchAtLogin.isEnabled) }
     }
 
+    // MARK: - Shared column
+
+    /// One leading column for the whole rail.
+    ///
+    /// `Label` will not do this: SF Symbols have different intrinsic widths
+    /// (`paintpalette` is visibly wider than `arrow.counterclockwise`), so a
+    /// rail built from `Label`s starts its text at a different x on nearly
+    /// every row. A fixed frame is what makes the column a column.
+    private static let glyphWidth: CGFloat = 18
+    private static let glyphGap: CGFloat = 8
+
+    private func glyph(_ systemImage: String) -> some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 12))
+            .frame(width: Self.glyphWidth, alignment: .center)
+    }
+
+    /// A checkbox occupying the same leading slot as an icon.
+    ///
+    /// The checkbox has to be label-less to sit in that slot, which would
+    /// normally cost the click target — a bare `Text` beside it toggles
+    /// nothing. Wrapping the row in a button and making the checkbox
+    /// transparent to hit-testing keeps the whole row clickable, which is how
+    /// a checkbox is expected to behave.
+    private func checkRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: Self.glyphGap) {
+                Toggle("", isOn: isOn)
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .allowsHitTesting(false)
+                    .frame(width: Self.glyphWidth, alignment: .center)
+                Text(title)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityRepresentation {
+            Toggle(title, isOn: isOn)
+        }
+    }
+
     // MARK: - Navigation rows
 
     /// A button rather than `List(selection:)`.
@@ -175,12 +219,19 @@ struct Sidebar: View {
         Button {
             selection = tab
         } label: {
-            Label(tab.title, systemImage: tab.symbol)
-                .badge(count ?? 0)
-                .foregroundStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.primary))
-                .tint(isSelected ? accent : .primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+            HStack(spacing: Self.glyphGap) {
+                glyph(tab.symbol)
+                Text(tab.title)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let count {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.secondary))
+                }
+            }
+            .foregroundStyle(isSelected ? AnyShapeStyle(accent) : AnyShapeStyle(.primary))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .listRowBackground(isSelected ? accent.opacity(0.16) : .clear)

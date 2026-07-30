@@ -75,7 +75,7 @@ what destroys the live taps.
 | `AboutView.swift` | `DeveloperView` (GitHub / LinkedIn link rows) and `VersionView` (version read from the bundle, requirements, what's new). |
 | `AppIcon.swift` | `AppIconStyle`, the bundle-id → hue derivation, and `AppIconView` / `GeneratedIconTile`. |
 | `CustomizeAppSheet.swift` | The pencil's sheet: edits one app's name and icon together. |
-| `AppRowView.swift` | One app row: icon, name (double-click to rename), live `LevelMeter`, slider, %, pencil, star, mute, context menu. |
+| `AppRowView.swift` | One app row: icon, name (double-click to rename), looping `PlayingIndicator`, slider, %, pencil, star, mute, context menu. |
 | `Preferences.swift` | `UserDefaults`: volume/mute blob, favourites, custom names, icon styles, hide-Dock-icon. |
 | `LaunchAtLogin.swift` | `SMAppService.mainApp` wrapper. No mirrored preference — the service is the source of truth. |
 | `SoundFlowApp.swift` | Scenes, `AppDelegate`, teardown on quit. |

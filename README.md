@@ -36,7 +36,8 @@ extension, no virtual audio driver to install, no login shell hacks.
 - **Accent themes** — six presets (System, Ocean, Forest, Sunset, Violet,
   Graphite) applied across sliders, stars and highlights, and as a soft
   background wash in both light and dark mode.
-- **Live level meters** — real RMS from the audio pipeline, not an animation.
+- **Playing indicator** — a pulse beside any app currently producing audio, so
+  you can see at a glance which row is making the noise.
 - **Launch at login** and an optional **hidden Dock icon** for a pure menu bar
   app.
 - **Zero latency when unused** — an app left at 100% is never tapped at all, so
@@ -145,7 +146,7 @@ internals and the Core Audio gotchas are in
 ### 1.0.0
 
 - Initial release: per-app volume and mute via Core Audio process taps,
-  favourites, renaming, device switching, accent themes and live level meters.
+  favourites, renaming, device switching and accent themes.
 
 ## Author
 

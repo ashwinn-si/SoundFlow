@@ -30,7 +30,7 @@ struct AppRowView: View {
                     }
 
                     if app.isPlaying {
-                        LevelMeter(level: app.level)
+                        PlayingIndicator()
                             .accessibilityLabel("Playing")
                     }
 
@@ -92,9 +92,13 @@ struct AppRowView: View {
         Button {
             onEdit(app)
         } label: {
-            Image(systemName: "pencil")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+            // `square.and.pencil` rather than `pencil`: at row size a bare
+            // pencil is one thin diagonal stroke and reads as a slash. The
+            // enclosing box is what makes it legible — weight and colour alone
+            // do not rescue it.
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
                 .frame(width: 16)
         }
         .buttonStyle(.borderless)
@@ -201,40 +205,49 @@ struct AppRowView: View {
     }
 }
 
-// MARK: - LevelMeter
+// MARK: - PlayingIndicator
 
-/// Three bars that rise and fall with the app's live RMS.
+/// Four bars pulsing on a loop, marking an app that is producing audio.
 ///
-/// Replaces the static `waveform` glyph that used to mark a playing app. The
-/// data was already there — `MixerEngine` writes `AppMix.level` every 80 ms —
-/// it just was not being shown. Only tapped apps produce a level, so an app at
-/// 100% shows the bars at rest, which correctly reads as "playing, untouched".
-struct LevelMeter: View {
-    let level: Float
+/// Deliberately **not** driven by the audio level, which is what the previous
+/// version did and why it was replaced. Only a tapped app produces RMS, and
+/// invariant 8 means an app left at 100% is never tapped — so its level was
+/// permanently zero, every bar collapsed to its 2pt minimum, and the row showed
+/// three dots that read as a truncated name. A real meter that is flat for
+/// exactly the apps the user has not touched is worse than no meter: it looks
+/// broken, and it is silent about the one thing it is there to say.
+///
+/// This says only "this app is playing", and says it the same way for every
+/// app.
+struct PlayingIndicator: View {
 
     @Environment(\.themeAccent) private var accent
+    @State private var isAnimating = false
 
-    /// Each bar reacts at its own pace so the group looks alive rather than
-    /// like one block scaling up and down.
-    private let weights: [Float] = [0.65, 1.0, 0.8]
+    /// Heights and rates are all coprime-ish so the group never falls into step
+    /// and starts pulsing as one block.
+    private let bars: [(height: CGFloat, duration: Double)] = [
+        (9, 0.52), (14, 0.37), (11, 0.61), (13, 0.44)
+    ]
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 1.5) {
-            ForEach(weights.indices, id: \.self) { index in
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(bars.indices, id: \.self) { index in
                 Capsule()
                     .fill(accent)
-                    .frame(width: 2, height: height(for: weights[index]))
+                    .frame(width: 2.5, height: bars[index].height)
+                    // Centre-anchored, so it reads as a waveform pulse rather
+                    // than a VU meter promising a level it is not showing.
+                    .scaleEffect(y: isAnimating ? 1 : 0.3, anchor: .center)
+                    .animation(
+                        .easeInOut(duration: bars[index].duration)
+                            .repeatForever(autoreverses: true),
+                        value: isAnimating
+                    )
             }
         }
-        .frame(width: 10, height: 10, alignment: .bottom)
+        .frame(height: 14)
         .opacity(0.9)
-        .animation(.easeOut(duration: 0.12), value: level)
-    }
-
-    private func height(for weight: Float) -> CGFloat {
-        // sqrt lifts the low end: RMS spends most of its time near zero, and a
-        // linear map would leave the bars looking permanently flat.
-        let scaled = sqrt(max(0, min(1, level))) * weight
-        return 2 + CGFloat(scaled) * 8
+        .onAppear { isAnimating = true }
     }
 }

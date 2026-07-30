@@ -44,9 +44,11 @@ final class AppMix {
     var isActive: Bool = true
 
     /// `true` while the process has an active output stream.
+    ///
+    /// Drives the sidebar's Playing filter, the row's pulsing indicator, and
+    /// the sort. Comes from the HAL's `IsRunningOutput`, so it is independent
+    /// of whether the app is tapped — an app at 100% still reports honestly.
     var isPlaying: Bool = false
-    /// Live meter level.
-    var level: Float = 0
     /// Set when macOS refuses to tap the app (FairPlay-protected audio).
     var isDRMProtected: Bool = false
 
@@ -79,7 +81,6 @@ final class AppMix {
         processObjectID = AudioObjectID(kAudioObjectUnknown)
         isActive = false
         isPlaying = false
-        level = 0
         // A future launch may not be DRM-protected; re-test rather than inherit.
         isDRMProtected = false
     }
@@ -178,7 +179,7 @@ final class MixerEngine {
     private var customNames: [String: String] = [:]
     /// Only apps the user customised. Absent means `AppIconStyle.default`.
     private var iconStyles: [String: AppIconStyle] = [:]
-    private var meterTimer: Timer?
+    private var watchdogFeedTimer: Timer?
     private var started = false
     /// Coalesces `UserDefaults` writes: a slider drag calls `persist` on every
     /// frame, and each call re-encodes the whole preference blob.
@@ -240,7 +241,7 @@ final class MixerEngine {
     }
 
     func stop() {
-        stopMetering()
+        stopWatchdogFeed()
         registry.stopMonitoring()
         deviceManager.stopMonitoringDeviceChanges()
 
@@ -697,7 +698,7 @@ final class MixerEngine {
         routedApps = newApps
         routeError = nil
         applyAllGains()
-        startMetering()
+        startWatchdogFeed()
 
         let monitor = RouteWatchdog(route: newRoute) { [weak self] in
             // Reading @MainActor state from the watchdog thread would be unsafe,
@@ -750,44 +751,46 @@ final class MixerEngine {
         taps.forEach { $0.destroy() }
         taps = []
         routedApps = []
-        stopMetering()
+        stopWatchdogFeed()
     }
 
-    // MARK: - Meters
+    // MARK: - Watchdog expectation
 
-    /// Cached so the watchdog thread never touches main-actor state.
+    /// Whether any routed app should currently be producing sound.
+    ///
+    /// Cached in a lock so `RouteWatchdog`, which runs on its own thread, never
+    /// touches main-actor state to answer the question.
     private let cachedExpectingAudio = OSAllocatedUnfairLock(initialState: false)
 
-    /// The meter timer runs only while a route exists.
+    /// Keeps `cachedExpectingAudio` fresh, and runs only while a route exists.
     ///
-    /// It used to be started unconditionally in `start()` and never stopped, so
-    /// an idle SoundFlow paid 12.5 Hz of timer — and 12.5 Hz of `@Observable`
-    /// mutation — forever, with no route to meter and nothing on screen. Idle
-    /// wakeups are what drain a battery overnight; this was the app's floor.
-    private func startMetering() {
-        guard meterTimer == nil else { return }
-        meterTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.updateMeters() }
+    /// This used to also read per-app RMS and publish it as `AppMix.level` for
+    /// the row meters, which is why it ticked at 12.5 Hz. The meters are gone —
+    /// they could only ever animate for apps the user had already turned down —
+    /// so all that remains is one boolean the watchdog samples against a
+    /// three-second window. 2 Hz is ample for that, and it is six times fewer
+    /// wakeups in an app built to sit in the menu bar all day.
+    ///
+    /// It is still stopped with the route. An earlier version started it
+    /// unconditionally in `start()` and never stopped it, so an idle SoundFlow
+    /// paid for a timer forever with no route to watch.
+    private func startWatchdogFeed() {
+        guard watchdogFeedTimer == nil else { return }
+        watchdogFeedTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateWatchdogExpectation() }
         }
     }
 
-    private func stopMetering() {
-        meterTimer?.invalidate()
-        meterTimer = nil
+    private func stopWatchdogFeed() {
+        watchdogFeedTimer?.invalidate()
+        watchdogFeedTimer = nil
         cachedExpectingAudio.withLock { $0 = false }
-        for app in apps where app.level != 0 { app.level = 0 }
     }
 
-    private func updateMeters() {
-        guard let ioProc = route?.ioProc else {
-            stopMetering()
+    private func updateWatchdogExpectation() {
+        guard route?.ioProc != nil else {
+            stopWatchdogFeed()
             return
-        }
-        for (index, app) in routedApps.enumerated() {
-            let level = ioProc.rms(slot: index)
-            // Writing an unchanged value still invalidates every row observing
-            // it. At 12.5 Hz that is a redraw of the whole list for nothing.
-            if abs(app.level - level) > 0.002 { app.level = level }
         }
         let expecting = routedApps.contains { $0.isPlaying && !$0.isMuted && $0.volume > 0.01 }
         cachedExpectingAudio.withLock { $0 = expecting }

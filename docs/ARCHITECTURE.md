@@ -127,6 +127,9 @@ routed and still needs a tap, it writes gain straight into the slot and skips
 | A device is plugged in or removed | `onDeviceListChanged` → `refreshDevices()` |
 | The **default output** changes | `onDefaultOutputChanged` → `refreshOutputState()` |
 | The **default input** changes | `onDefaultInputChanged` → `refreshInputState()` (never touches the route) |
+| The machine wakes | `NSWorkspace.didWakeNotification` → `handleWake()` |
+| Permission is granted while running | `refreshPermission()` on app activation |
+| The watchdog sees a dead pipeline | `onNeedsRebuild` → `rebuildRoute()` |
 
 > **Two listeners, not one.** The process-list listener only fires when a
 > process appears or disappears; it says nothing about an existing process
@@ -145,9 +148,6 @@ routed and still needs a tap, it writes gain straight into the slot and skips
 > To check this is working: `refreshApps()` logs at debug level, so
 > `log stream --predicate 'subsystem == "com.soundflow.app"' --level debug`
 > should print a line the moment you press play in any app.
-| The machine wakes | `NSWorkspace.didWakeNotification` → `handleWake()` |
-| Permission is granted while running | `refreshPermission()` on app activation |
-| The watchdog sees a dead pipeline | `onNeedsRebuild` → `rebuildRoute()` |
 
 The default-device listeners are separate from the device-list listener on
 purpose. Picking a different *existing* device in Control Center or the Sound
@@ -176,7 +176,7 @@ but only after three seconds of silence and only if something is playing.
 | CoreAudio IO thread | `mixerIOProc` | **Real-time.** No allocation, no locks, no Swift runtime, no logging. POD memory only. |
 | HAL listener threads | `registryListener`, device listeners | Hop to main immediately and return. |
 | Watchdog thread | `RouteWatchdog.poll()` | `.utility` QoS. Never reads main-actor state. Counters live behind an `OSAllocatedUnfairLock` — `stop()`, `noteRebuilt()` and `recoveryAttempts` are all called from the owner's thread. |
-| Meter timer | `updateMeters()` every 0.08 s | Main actor. Reads slot RMS, caches "expecting audio". **Runs only while a route exists** — started by `syncRoute()`, stopped by `teardownRoute()`. |
+| Watchdog feed timer | `updateWatchdogExpectation()` every 0.5 s | Main actor. Caches "expecting audio" for the watchdog. **Runs only while a route exists** — started by `syncRoute()`, stopped by `teardownRoute()`. |
 
 Two crossings deserve attention:
 
@@ -188,7 +188,7 @@ each value is independent and one buffer of latency is fine.
 
 **Watchdog → main actor.** The watchdog needs to know whether anything *should*
 be playing (silence is only suspicious if it is unexpected), but reading
-`@MainActor` state from its thread would be unsafe. So `updateMeters()` caches
+`@MainActor` state from its thread would be unsafe. So `updateWatchdogExpectation()` caches
 the answer into an `OSAllocatedUnfairLock`-guarded `Bool` on each tick, and the
 watchdog reads that.
 
@@ -222,7 +222,7 @@ happens at configure time, off the audio thread.
 the squared curve makes a linear slider feel linear to the ear. Range is
 `0...1`; `PLAN.md`'s 0–150% was never implemented.
 
-**RMS** is measured on each slot's *first* channel only — enough for a meter and
+**RMS** is measured on each slot's *first* channel only — enough for diagnostics and
 for the watchdog's silence detection, and it keeps the inner loop cheap.
 
 **`diagnostics.inputPeak` is opt-in.** Computing it means scanning every sample
@@ -313,8 +313,7 @@ XPC helpers out of the list.
 | `volume`, `isMuted` | Persisted. Drive `needsTap`. |
 | `needsTap` | `isActive && !isDRMProtected && (isMuted \|\| volume < 0.999)` |
 | `isActive` | `false` for a starred app with no live CoreAudio process. No process object, so it can never be tapped. |
-| `isPlaying` | From the HAL's `IsRunningOutput`. Drives the sidebar's **Playing** filter, the row's level meter, and the sort. It is only as live as the per-process listener that feeds it — see below. |
-| `level` | Live meter, written every 0.08 s. |
+| `isPlaying` | From the HAL's `IsRunningOutput`. Drives the sidebar's **Playing** filter, the row's playing indicator, and the sort. It is only as live as the per-process listener that feeds it — see below. |
 | `isDRMProtected` | Set by tap failure. Disables the controls. |
 | `isFavorite` | Persisted. **Display filter only.** |
 | `customName` / `displayName` | Persisted override. UI must read `displayName`. |
@@ -378,18 +377,28 @@ without hopping to the main actor.
 id from `@AppStorage(Preferences.themeKey)` and applies it **once** at the root
 as `.tint()`, so `Slider`, the star button, `Toggle` and selection states all
 follow with no per-view plumbing. `\.themeAccent` carries the raw `Color` for
-the two places that draw their own shapes — the nav bar highlight and
-`LevelMeter`.
+the few places that draw their own shapes — the sidebar's selection tint, the
+window's accent wash, and `PlayingIndicator`.
 
 Preset colours are deliberately mid-tone: a colour that reads well on white
 usually washes out on charcoal, so nothing sits at the extremes of lightness.
 `Themes.theme(id:)` falls back to the system accent, so an id from a future
 build degrades quietly rather than losing colour entirely.
 
-`LevelMeter` is three bars driven by `AppMix.level`, which `MixerEngine` has
-been writing every 80 ms all along and nothing displayed. Bar height uses
-`sqrt(level)` because RMS spends most of its time near zero and a linear map
-leaves the bars looking permanently flat.
+`PlayingIndicator` is four bars pulsing on a loop beside any app with
+`isPlaying` set. It is **not** a level meter, and the distinction was learned
+the hard way.
+
+It used to be one: three bars driven by `AppMix.level`, which the engine wrote
+from slot RMS every 80 ms. The flaw is structural. Only a *tapped* app produces
+RMS, and invariant 8 means an app left at 100% is never tapped — so its level
+was permanently zero, every bar sat at its 2pt floor, and the row showed three
+dots that read as a truncated name. A meter that is flat for exactly the apps
+the user has not touched is worse than no meter: it looks broken, and it is
+silent about the one thing it exists to say.
+
+The replacement animates identically for every playing app, tapped or not, and
+reads nothing from the audio path.
 
 ### Persistence
 
@@ -490,20 +499,24 @@ Measured on an M4, idle with no apps attenuated:
 | Idle wakeups | 6.6/s | 5.7/s | ≤ 5/s |
 | Threads | 8 | 10 | — |
 
-The baseline wakeup number traced to one line: `MixerEngine.meterTimer` fired
-every **0.08 s** and was started unconditionally in `start()`, so it kept running
-when no route existed, nothing was being metered, and no UI was on screen.
+The baseline wakeup number traced to one line: the timer fired every **0.08 s**
+and was started unconditionally in `start()`, so it kept running when no route
+existed, nothing was being metered, and no UI was on screen.
 
-`startMetering()` / `stopMetering()` now bracket the route's lifetime, so an
-idle SoundFlow runs no meter timer at all. `updateMeters()` additionally writes
-`app.level` only when it moves by more than 0.002 — writing an unchanged value
-still invalidates every row observing it, which was a full list redraw 12.5×/s
-for nothing.
+`startWatchdogFeed()` / `stopWatchdogFeed()` now bracket the route's lifetime,
+so an idle SoundFlow runs no timer at all.
 
-macOS coalesces aggressively, so removing 12.5 Hz of timer only bought about
-1 wakeup/s. The remaining 5.7/s is SwiftUI, the `MenuBarExtra` and the HAL
-listeners. The second lever named in the original analysis is still unused:
-suspend metering when neither the window nor the popover is visible.
+The timer was also **retimed from 0.08 s to 0.5 s** when the level meters were
+removed. 12.5 Hz existed to make bars move smoothly; all that survives is one
+boolean the watchdog samples against a three-second window, which does not need
+it. That change also deleted the per-app `app.level` write — which, even guarded
+to fire only on a move of more than 0.002, invalidated every routed row up to
+12.5×/s for a value nothing now reads.
+
+macOS coalesces aggressively, so removing the original 12.5 Hz timer only bought
+about 1 wakeup/s. The remaining 5.7/s is SwiftUI, the `MenuBarExtra` and the HAL
+listeners. One lever named in the original analysis is still unused: suspend the
+feed when neither the window nor the popover is visible.
 
 `ProcessTapEngine` and `MixerIOProc` are arm-friendly: the callback touches only
 POD memory, allocates nothing, and takes no locks. The one piece of avoidable
