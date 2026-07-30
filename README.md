@@ -8,7 +8,7 @@ macOS has never shipped per-application volume. SoundFlow adds it natively,
 using Core Audio process taps on Apple silicon and Intel Macs. No kernel
 extension, no virtual audio driver to install, no login shell hacks.
 
-[![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-3D9E6B)](https://github.com/ashwinn-si/SoundFlow/releases)
+[![Version 1.1.1](https://img.shields.io/badge/version-1.1.1-3D9E6B)](https://github.com/ashwinn-si/SoundFlow/releases)
 [![macOS 15+](https://img.shields.io/badge/macOS-15%2B-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-native%20arm64-0071e3)](https://support.apple.com/en-us/116943)
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://swift.org)
@@ -131,6 +131,11 @@ internals and the Core Audio gotchas are in
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Release notes
+
+### 1.1.1
+
+- New app icon: five faders at different levels, one of them turned down —
+  the app's own accent wash and capsule shapes rather than a generic waveform.
 
 ### 1.1.0
 
