@@ -121,11 +121,30 @@ routed and still needs a tap, it writes gain straight into the slot and skips
 
 | Trigger | Path |
 | :--- | :--- |
-| An app starts or stops producing audio | `AudioProcessRegistry.onChange` → `refreshApps()` |
+| An app starts or stops producing audio | per-process `IsRunningOutput` listener → `AudioProcessRegistry.onChange` → `refreshApps()` |
+| An audio process appears or disappears | `kAudioHardwarePropertyProcessObjectList` listener → same path |
 | A slider or mute changes | `setVolume` / `setMuted` → `applyOrSync` |
 | A device is plugged in or removed | `onDeviceListChanged` → `refreshDevices()` |
 | The **default output** changes | `onDefaultOutputChanged` → `refreshOutputState()` |
 | The **default input** changes | `onDefaultInputChanged` → `refreshInputState()` (never touches the route) |
+
+> **Two listeners, not one.** The process-list listener only fires when a
+> process appears or disappears; it says nothing about an existing process
+> starting to play. Playback state comes from a *separate* per-process
+> `IsRunningOutput` listener, and those are installed in two places:
+> `startMonitoring()` seeds them for processes that already exist, and every
+> `snapshot()` re-syncs them as processes come and go.
+>
+> Both matter. `startMonitoring()` used to install neither, and `MixerEngine`
+> called `refreshApps()` — the only thing that reached the re-sync — *before*
+> monitoring started, where an `isListening` guard made it a no-op. The result
+> was zero output listeners for the whole session: any app already running at
+> launch could start playing and nothing fired, so `isPlaying` stayed false
+> until something unrelated changed the process list. Observe before you read.
+>
+> To check this is working: `refreshApps()` logs at debug level, so
+> `log stream --predicate 'subsystem == "com.soundflow.app"' --level debug`
+> should print a line the moment you press play in any app.
 | The machine wakes | `NSWorkspace.didWakeNotification` → `handleWake()` |
 | Permission is granted while running | `refreshPermission()` on app activation |
 | The watchdog sees a dead pipeline | `onNeedsRebuild` → `rebuildRoute()` |
@@ -294,7 +313,7 @@ XPC helpers out of the list.
 | `volume`, `isMuted` | Persisted. Drive `needsTap`. |
 | `needsTap` | `isActive && !isDRMProtected && (isMuted \|\| volume < 0.999)` |
 | `isActive` | `false` for a starred app with no live CoreAudio process. No process object, so it can never be tapped. |
-| `isPlaying` | From the HAL's `IsRunningOutput`. Affects sort only. |
+| `isPlaying` | From the HAL's `IsRunningOutput`. Drives the sidebar's **Playing** filter, the row's level meter, and the sort. It is only as live as the per-process listener that feeds it — see below. |
 | `level` | Live meter, written every 0.08 s. |
 | `isDRMProtected` | Set by tap failure. Disables the controls. |
 | `isFavorite` | Persisted. **Display filter only.** |

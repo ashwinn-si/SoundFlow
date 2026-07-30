@@ -5,6 +5,14 @@ import Foundation
 import Observation
 import SoundFlowCore
 
+// MARK: - Logging
+
+/// Diagnostics for the parts of the engine driven by HAL notifications, where
+/// a missing callback is otherwise indistinguishable from nothing happening.
+enum SoundFlowLog {
+    static let registry = Logger(subsystem: "com.soundflow.app", category: "registry")
+}
+
 // MARK: - AppMix
 
 /// One application in the mixer.
@@ -199,12 +207,21 @@ final class MixerEngine {
 
         refreshDevices()
         requestPermission()
-        refreshApps()
 
+        // Observe before reading, not after.
+        //
+        // `refreshApps()` used to run first, and its `snapshot()` is what
+        // installs the per-process `IsRunningOutput` listeners — but that call
+        // early-returns while the registry is not yet listening. The result was
+        // that no app running at launch ever had an output listener: it could
+        // start playing and nothing fired, so `isPlaying` stayed false until
+        // some unrelated change to the process list forced a refresh.
         registry.onChange = { [weak self] in
             Task { @MainActor in self?.refreshApps() }
         }
         registry.startMonitoring()
+
+        refreshApps()
 
         deviceManager.onDeviceListChanged = { [weak self] in
             Task { @MainActor in self?.refreshDevices() }
@@ -417,6 +434,9 @@ final class MixerEngine {
         }
 
         apps = sortApps(updated)
+
+        let playingCount = updated.filter(\.isPlaying).count
+        SoundFlowLog.registry.debug("refreshApps: \(updated.count, privacy: .public) apps, \(playingCount, privacy: .public) playing")
 
         syncRoute()
     }
