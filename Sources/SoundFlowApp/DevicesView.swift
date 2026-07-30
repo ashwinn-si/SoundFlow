@@ -17,7 +17,7 @@ struct DevicesView: View {
                     symbol: "speaker.wave.2.fill",
                     devices: engine.outputDevices,
                     selection: outputSelection,
-                    detail: engine.outputDevices.first { $0.id == outputSelection.wrappedValue }
+                    detail: engine.outputDevices.first { $0.id == engine.outputDeviceID }
                 ) {
                     if engine.hasMasterVolumeControl {
                         LevelSlider(
@@ -111,9 +111,10 @@ struct DevicesView: View {
 
     // MARK: - Selection
 
+    /// Matched on device id, not name — see `MixerView.outputSelection`.
     private var outputSelection: Binding<AudioObjectID> {
         Binding(
-            get: { engine.outputDevices.first { $0.name == engine.outputDeviceName }?.id ?? 0 },
+            get: { engine.outputDeviceID },
             set: { newID in
                 if let device = engine.outputDevices.first(where: { $0.id == newID }) {
                     engine.selectOutputDevice(device)

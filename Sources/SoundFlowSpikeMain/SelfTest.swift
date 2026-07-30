@@ -22,7 +22,6 @@ enum SelfTest {
         TapMaintenance.destroyOrphanedTaps()
         AggregateRoute.destroyOrphanedRoutes()
 
-        let registry = AudioProcessRegistry()
         let deviceManager = AudioDeviceManager()
 
         print("Bundle: \(Bundle.main.bundleIdentifier ?? "none (unbundled binary)")")
@@ -107,6 +106,10 @@ enum SelfTest {
             route.destroy()
             tap.destroy()
         }
+        // Off by default in the app — the peak scan is the diagnostic that
+        // separates "the tap is silent" from "our gain zeroed it", and this is
+        // exactly the tool that needs it.
+        ioProc.measuresInputPeak = true
         print("Route:  aggregate \(route.deviceID)\n")
 
         // ── Gain sweep ────────────────────────────────────────────────
@@ -206,6 +209,7 @@ enum SelfTest {
             let route = AggregateRoute(outputDeviceUID: outputUID)
             defer { route.destroy() }
             if route.start(taps: [globalTap]), let ioProc = route.ioProc {
+                ioProc.measuresInputPeak = true
                 ioProc.setVolume(slot: 0, sliderValue: 1.0)
                 Thread.sleep(forTimeInterval: 1.5)
                 let diagnostics = ioProc.diagnostics
@@ -242,6 +246,7 @@ enum SelfTest {
 
                     let route = AggregateRoute(outputDeviceUID: outputUID)
                     if route.start(taps: [tap]), let ioProc = route.ioProc {
+                        ioProc.measuresInputPeak = true
                         ioProc.setVolume(slot: 0, sliderValue: 1.0)
                         Thread.sleep(forTimeInterval: 1.5)
                         rms = ioProc.rms(slot: 0)

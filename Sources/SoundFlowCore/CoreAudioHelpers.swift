@@ -44,12 +44,22 @@ public func caArray<T: BitwiseCopyable>(_ objectID: AudioObjectID,
           dataSize > 0 else { return [] }
 
     let count = Int(dataSize) / MemoryLayout<T>.size
+    guard count > 0 else { return [] }
+
+    // Tell the HAL only about the bytes we actually allocated. `dataSize` is not
+    // guaranteed to be a whole multiple of the element size, and the property can
+    // also grow between the size query and the read (a device appearing mid-call),
+    // either of which would let CoreAudio write past the end of `values`.
+    var readSize = UInt32(count * MemoryLayout<T>.stride)
     var values = [T](repeating: zero, count: count)
     let status = values.withUnsafeMutableBytes { buffer in
-        AudioObjectGetPropertyData(objectID, &addr, 0, nil, &dataSize, buffer.baseAddress!)
+        AudioObjectGetPropertyData(objectID, &addr, 0, nil, &readSize, buffer.baseAddress!)
     }
     guard status == noErr else { return [] }
-    return values
+
+    // A short read means fewer elements than the size query promised.
+    let returned = min(count, Int(readSize) / MemoryLayout<T>.size)
+    return returned < count ? Array(values.prefix(returned)) : values
 }
 
 /// Reads a `CFString` property as a Swift `String`.

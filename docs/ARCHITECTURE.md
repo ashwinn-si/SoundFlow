@@ -75,6 +75,21 @@ had changed; the stale id was destroyed later while the real tap leaked and left
 the app permanently muted. Recovery is now delegated back to the one component
 that owns taps.
 
+Because a rebuild destroys the route, it also destroys that route's watchdog —
+so the **recovery budget cannot live in the watchdog's lifetime.** `MixerEngine`
+holds `routeRecoveryAttempts`, reads it off the dying watchdog in
+`rebuildRoute()`, and hands it to the replacement via
+`start(carryingOverAttempts:)`. Without that hand-off `maxRecoveryAttempts`
+never bites: a permanently dead pipeline is torn down and rebuilt every three
+seconds for as long as the app runs. Only a genuine change of circumstances —
+a slider move, a device change, a wake, a permission grant — resets the budget,
+which is what `syncRoute(preservingRecoveryBudget:)` distinguishes.
+
+When the budget does run out, `onGaveUp` → `MixerEngine.abandonRoute()` drops
+the route and sets `routeError`. Dropping it is the correct end state: with no
+tap the apps play natively at full volume, which is audibly wrong rather than
+silently wrong.
+
 ### `syncRoute()` — the single decision point
 
 Every path that could change the audio graph funnels here.
@@ -102,6 +117,36 @@ an audible glitch for every app in it.
 routed and still needs a tap, it writes gain straight into the slot and skips
 `syncRoute()` entirely.
 
+### What reaches `syncRoute()`
+
+| Trigger | Path |
+| :--- | :--- |
+| An app starts or stops producing audio | `AudioProcessRegistry.onChange` → `refreshApps()` |
+| A slider or mute changes | `setVolume` / `setMuted` → `applyOrSync` |
+| A device is plugged in or removed | `onDeviceListChanged` → `refreshDevices()` |
+| The **default output** changes | `onDefaultOutputChanged` → `refreshOutputState()` |
+| The **default input** changes | `onDefaultInputChanged` → `refreshInputState()` (never touches the route) |
+| The machine wakes | `NSWorkspace.didWakeNotification` → `handleWake()` |
+| Permission is granted while running | `refreshPermission()` on app activation |
+| The watchdog sees a dead pipeline | `onNeedsRebuild` → `rebuildRoute()` |
+
+The default-device listeners are separate from the device-list listener on
+purpose. Picking a different *existing* device in Control Center or the Sound
+pane adds and removes nothing, so `kAudioHardwarePropertyDevices` never fires
+for it — with only that listener the route went on feeding the old device and
+the picker showed a stale selection.
+
+`refreshOutputState()` keys the "did it actually change?" test on the device
+**UID**, not the `AudioDeviceID`: ids are recycled as hardware comes and goes,
+so an unplug/replug can hand back the same number for a different device.
+
+**Sleep and wake.** The route is torn down on `willSleepNotification` — done
+synchronously via `MainActor.assumeIsolated`, because the system does not wait
+for a queue to drain before suspending and a teardown that lands after sleep is
+a teardown that did not happen. On wake, `handleWake()` re-reads devices and
+rebuilds. The watchdog would eventually catch the post-wake zero-buffer state,
+but only after three seconds of silence and only if something is playing.
+
 ---
 
 ## 3. Threading
@@ -111,8 +156,8 @@ routed and still needs a tap, it writes gain straight into the slot and skips
 | Main actor | `MixerEngine`, `AppMix`, all SwiftUI | Everything observable lives here. |
 | CoreAudio IO thread | `mixerIOProc` | **Real-time.** No allocation, no locks, no Swift runtime, no logging. POD memory only. |
 | HAL listener threads | `registryListener`, device listeners | Hop to main immediately and return. |
-| Watchdog thread | `RouteWatchdog.poll()` | `.utility` QoS. Never reads main-actor state. |
-| Meter timer | `updateMeters()` every 0.08 s | Main actor. Reads slot RMS, caches "expecting audio". |
+| Watchdog thread | `RouteWatchdog.poll()` | `.utility` QoS. Never reads main-actor state. Counters live behind an `OSAllocatedUnfairLock` — `stop()`, `noteRebuilt()` and `recoveryAttempts` are all called from the owner's thread. |
+| Meter timer | `updateMeters()` every 0.08 s | Main actor. Reads slot RMS, caches "expecting audio". **Runs only while a route exists** — started by `syncRoute()`, stopped by `teardownRoute()`. |
 
 Two crossings deserve attention:
 
@@ -160,6 +205,12 @@ the squared curve makes a linear slider feel linear to the ear. Range is
 
 **RMS** is measured on each slot's *first* channel only — enough for a meter and
 for the watchdog's silence detection, and it keeps the inner loop cheap.
+
+**`diagnostics.inputPeak` is opt-in.** Computing it means scanning every sample
+of input buffer 0 on every callback, ~87 times a second, for a number nothing in
+the app reads. `MixerIOProc.measuresInputPeak` defaults to `false`; the spike
+CLI, `SelfTest` and `TapPermission.verifyAudioFlows` set it because separating
+"the tap is silent" from "our gain zeroed it" is exactly their job.
 
 ---
 
@@ -321,6 +372,11 @@ leaves the bars looking permanently flat.
 All in `UserDefaults`, all keyed by bundle id, so settings survive both quitting
 the app and restarting SoundFlow.
 
+Writes to the volume blob are **debounced by 400 ms**. A slider drag calls
+`persist` on every frame and each call re-encodes the whole dictionary to JSON on
+the main thread; only the last value matters. `MixerEngine.stop()` flushes any
+pending write, so a level set moments before quitting is not lost.
+
 | Key | Shape | Cleared by |
 | :--- | :--- | :--- |
 | `SoundFlow.appPreferences` | JSON blob `[bundleID: {volume, isMuted}]` | "Reset All Volumes" |
@@ -400,29 +456,35 @@ low-power state; a background app that never sleeps is what drains a battery
 overnight. CPU percentage barely moves for an app like this, so it is the
 weaker signal.
 
-Baseline measured 2026-07-30, M4, idle with no apps attenuated:
+Measured on an M4, idle with no apps attenuated:
 
-| Metric | Measured | Target |
-| :--- | :--- | :--- |
-| CPU | 0.11% avg | ≤ 1% |
-| Energy impact | 0.42 | ≤ 1.0 |
-| Idle wakeups | 6.6/s | ≤ 5/s |
-| Threads | 8 | — |
+| Metric | Baseline 2026-07-30 | After 2026-07-30 | Target |
+| :--- | :--- | :--- | :--- |
+| CPU | 0.11% avg | 0.13% avg | ≤ 1% |
+| Energy impact | 0.42 | 0.39 | ≤ 1.0 |
+| Idle wakeups | 6.6/s | 5.7/s | ≤ 5/s |
+| Threads | 8 | 10 | — |
 
-The wakeup number traces to one line: `MixerEngine.meterTimer` fires every
-**0.08 s** and is started unconditionally in `start()`, so it keeps running when
-no route exists, nothing is being metered, and no UI is on screen. 12.5 Hz of
-timer maps to ~6.6 observed wakeups because macOS coalesces them, but it is
-still a floor the app pays for permanently. Two obvious fixes if this ever
-matters: stop the timer when `route == nil`, and suspend it when neither the
-window nor the popover is visible — `updateMeters()` mutates `@Observable`
-state 12.5×/s, which invalidates every visible row whether or not the value
-changed.
+The baseline wakeup number traced to one line: `MixerEngine.meterTimer` fired
+every **0.08 s** and was started unconditionally in `start()`, so it kept running
+when no route existed, nothing was being metered, and no UI was on screen.
 
-`ProcessTapEngine` and `MixerIOProc` are already arm-friendly: the callback
-touches only POD memory, allocates nothing, and takes no locks. One thing does
-run in the hot path that need not — the `lastInputPeak` scan walks every sample
-of input buffer 0 on **every** callback purely for diagnostics.
+`startMetering()` / `stopMetering()` now bracket the route's lifetime, so an
+idle SoundFlow runs no meter timer at all. `updateMeters()` additionally writes
+`app.level` only when it moves by more than 0.002 — writing an unchanged value
+still invalidates every row observing it, which was a full list redraw 12.5×/s
+for nothing.
+
+macOS coalesces aggressively, so removing 12.5 Hz of timer only bought about
+1 wakeup/s. The remaining 5.7/s is SwiftUI, the `MenuBarExtra` and the HAL
+listeners. The second lever named in the original analysis is still unused:
+suspend metering when neither the window nor the popover is visible.
+
+`ProcessTapEngine` and `MixerIOProc` are arm-friendly: the callback touches only
+POD memory, allocates nothing, and takes no locks. The one piece of avoidable
+work in the hot path — the `lastInputPeak` scan over every sample of input
+buffer 0 — is now behind `MixerIOProc.measuresInputPeak`, which the app leaves
+off and only the diagnostic tools set.
 
 ## 10. Implemented but unused
 
@@ -434,5 +496,8 @@ something similar.
 | `AggregateRoute.setTaps(_:)` | Updates a live route's tap list in place (`kAudioAggregateDevicePropertyTapList` is settable), falling back to a rebuild. `MixerEngine` always rebuilds instead. The obvious optimisation if rebuild glitches ever matter. |
 | `TapPermission.verifyAudioFlows(...)` | Ground-truth permission check, ~2 s. |
 | `ProcessTap.createGlobal(excluding:)` | Diagnostic control case; `SelfTest` only. |
-| `RouteWatchdog.onGaveUp` | Never assigned — after 5 failed rebuilds the route dies **silently**, with no UI. A real gap if a user ever hits it. |
 | `AudioDeviceManager.isMuted(deviceID:scope:)`, `setMuted(_:deviceID:scope:)` | Device-level mute, in either scope. No UI uses it — per-app mute goes through the IOProc slot instead, and there is no hardware mic-mute button yet. |
+
+`RouteWatchdog.onGaveUp` used to sit in this table. It is now wired to
+`MixerEngine.abandonRoute()`, which is what makes `maxRecoveryAttempts` an
+actual limit rather than a number nothing reads.

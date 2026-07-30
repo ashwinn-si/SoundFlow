@@ -12,9 +12,14 @@ struct SettingsView: View {
 
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
-    /// Suppresses `onChange` while the toggle is being reset programmatically,
-    /// so a failed registration cannot bounce back into another attempt.
-    @State private var isSyncingLaunchToggle = false
+    /// The value of a programmatic toggle write whose `onChange` has not fired
+    /// yet, so it can be recognised and ignored.
+    ///
+    /// A plain `isSyncing` flag set and cleared around the assignment does not
+    /// work: `onChange` runs on the next view update, by which point the flag is
+    /// already back to `false`. The result was that a failed `register()` reset
+    /// the toggle, which then read as a user edit and fired an `unregister()`.
+    @State private var pendingProgrammaticValue: Bool?
 
     private static let githubURL = URL(string: "https://github.com/ashwinn-si")!
 
@@ -94,7 +99,11 @@ struct SettingsView: View {
         section("Startup", symbol: "power") {
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, enabled in
-                    guard !isSyncingLaunchToggle else { return }
+                    if pendingProgrammaticValue == enabled {
+                        pendingProgrammaticValue = nil
+                        return
+                    }
+                    pendingProgrammaticValue = nil
                     applyLaunchAtLogin(enabled)
                 }
 
@@ -207,8 +216,7 @@ struct SettingsView: View {
 
     private func syncLaunchToggle(to value: Bool) {
         guard launchAtLogin != value else { return }
-        isSyncingLaunchToggle = true
+        pendingProgrammaticValue = value
         launchAtLogin = value
-        isSyncingLaunchToggle = false
     }
 }

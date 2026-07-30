@@ -122,6 +122,8 @@ struct SoundFlowSpike {
             route.destroy()
             exit(1)
         }
+        // Diagnostic-only measurement; the app leaves it off.
+        ioProc.measuresInputPeak = true
 
         // ── Independent gains ─────────────────────────────────────────
         // The whole point: different volumes for different apps, at once.

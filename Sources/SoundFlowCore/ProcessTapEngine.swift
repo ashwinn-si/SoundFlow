@@ -26,11 +26,13 @@ public enum TapError: Error, CustomStringConvertible {
 /// Classifies the `OSStatus` from `AudioHardwareCreateProcessTap`.
 ///
 /// Permission failures are indistinguishable from other errors without this
-/// mapping. `560947818` is `kAudioHardwareIllegalOperationError` ('what'), which
-/// the HAL returns when TCC blocks tap creation.
+/// mapping. `kAudioHardwareIllegalOperationError` ('what', 560947818) is what the
+/// HAL returns when TCC blocks tap creation; `kAudio_ParamError` (-50) is the
+/// older form. Both are spelled as SDK constants rather than literals so a future
+/// SDK renumbering cannot silently reclassify a denial as a generic failure.
 private func classify(_ status: OSStatus) -> TapError {
     switch status {
-    case 560947818, -50:
+    case kAudioHardwareIllegalOperationError, OSStatus(kAudio_ParamError):
         return .permissionDenied
     case kAudioHardwareBadObjectError, kAudioHardwareNotRunningError:
         return .drmProtected

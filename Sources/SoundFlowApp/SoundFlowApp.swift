@@ -7,30 +7,17 @@ import SwiftUI
 /// the same mixer. Both are driven by one shared `MixerEngine`.
 @main
 struct SoundFlowApp: App {
-    @State private var engine = MixerEngine()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
         Window("SoundFlow", id: "main") {
-            MixerView(engine: engine)
-                .task {
-                    delegate.engine = engine
-                    engine.start()
-                }
-                // Returning from System Settings should update the permission
-                // state without needing a relaunch.
-                .onReceive(
-                    NotificationCenter.default.publisher(
-                        for: NSApplication.didBecomeActiveNotification)
-                ) { _ in
-                    engine.refreshPermission()
-                }
+            MixerView(engine: delegate.engine)
         }
         .defaultSize(width: 420, height: 560)
         .windowResizability(.contentMinSize)
 
         MenuBarExtra("SoundFlow", systemImage: "slider.horizontal.3") {
-            MixerView(engine: engine, compact: true)
+            MixerView(engine: delegate.engine, compact: true)
         }
         .menuBarExtraStyle(.window)
 
@@ -40,20 +27,35 @@ struct SoundFlowApp: App {
     }
 }
 
-/// Handles teardown and the Dock-icon preference.
+/// Owns the engine, and handles startup, teardown and the Dock-icon preference.
+///
+/// The engine deliberately lives here rather than in a `@State` on the `App`
+/// struct started from the main window's `.task`. That start never ran when the
+/// window was not restored at launch — the common case for "hide Dock icon" plus
+/// "launch at login" — so saved levels were not applied, the menu bar was empty,
+/// and `applicationWillTerminate` had no engine to tear taps down with.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var engine: MixerEngine?
+    let engine = MixerEngine()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if UserDefaults.standard.bool(forKey: Preferences.hideDockIconKey) {
             NSApp.setActivationPolicy(.accessory)
         }
+        engine.start()
+    }
+
+    /// Returning from System Settings should update the permission state — and
+    /// build the route — without needing a relaunch. Handled here rather than in
+    /// the main window so it still works when only the menu bar is open.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        engine.refreshPermission()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         // Destroys every tap and aggregate device. Without this, taps outlive
         // the app and leave the apps they were muting silent.
-        MainActor.assumeIsolated { engine?.stop() }
+        engine.stop()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
