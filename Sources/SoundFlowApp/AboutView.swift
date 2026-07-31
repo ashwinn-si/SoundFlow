@@ -78,11 +78,11 @@ struct VersionView: View {
 
                 AboutCard(title: "What's New", symbol: "sparkles") {
                     VStack(alignment: .leading, spacing: 6) {
+                        bullet("The playing indicator flattens to a line for a muted app.")
+                        bullet("Playback is picked up as it starts, not seconds later.")
                         bullet("A new app icon, drawn from the app's own accent and shapes.")
                         bullet("Sidebar navigation with counted App, Starred and Playing filters.")
                         bullet("Per-app custom icons — keep the real one, or generate a tile.")
-                        bullet("Edit an app's name and icon together from the pencil button.")
-                        bullet("A themed background wash that follows the accent colour.")
                     }
                 }
             }
