@@ -78,11 +78,11 @@ struct VersionView: View {
 
                 AboutCard(title: "What's New", symbol: "sparkles") {
                     VStack(alignment: .leading, spacing: 6) {
+                        bullet("The output slider now follows the Mac's own volume, both ways.")
+                        bullet("Mute the output or the mic from the speaker icon.")
                         bullet("The playing indicator flattens to a line for a muted app.")
                         bullet("Playback is picked up as it starts, not seconds later.")
                         bullet("A new app icon, drawn from the app's own accent and shapes.")
-                        bullet("Sidebar navigation with counted App, Starred and Playing filters.")
-                        bullet("Per-app custom icons — keep the real one, or generate a tile.")
                     }
                 }
             }

@@ -8,7 +8,7 @@ macOS has never shipped per-application volume. SoundFlow adds it natively,
 using Core Audio process taps on Apple silicon and Intel Macs. No kernel
 extension, no virtual audio driver to install, no login shell hacks.
 
-[![Version 1.1.2](https://img.shields.io/badge/version-1.1.2-3D9E6B)](https://github.com/ashwinn-si/SoundFlow/releases)
+[![Version 1.1.3](https://img.shields.io/badge/version-1.1.3-3D9E6B)](https://github.com/ashwinn-si/SoundFlow/releases)
 [![macOS 15+](https://img.shields.io/badge/macOS-15%2B-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-native%20arm64-0071e3)](https://support.apple.com/en-us/116943)
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://swift.org)
@@ -131,6 +131,14 @@ internals and the Core Audio gotchas are in
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Release notes
+
+### 1.1.3
+
+- The output and input sliders now track the Mac's own volume both ways. Moving
+  one moves the other, so the app can no longer show 19% while the Mac is at
+  81%. Previously nothing told SoundFlow the volume had changed, so its slider
+  sat at whatever it last read.
+- Mute is part of that: the speaker icon reflects the system mute and toggles it.
 
 ### 1.1.2
 
