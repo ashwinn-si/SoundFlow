@@ -150,7 +150,11 @@ struct MixerView: View {
                     symbol: "speaker.fill",
                     value: Binding(
                         get: { Double(engine.masterVolume) },
-                        set: { engine.masterVolume = Float($0) }
+                        set: { engine.setMasterVolume(Float($0)) }
+                    ),
+                    isMuted: Binding(
+                        get: { engine.isOutputMuted },
+                        set: { engine.setOutputMuted($0) }
                     )
                 )
             }

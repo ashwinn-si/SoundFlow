@@ -64,7 +64,7 @@ what destroys the live taps.
 | `AggregateRoute.swift` | Private aggregate device: taps in, one physical output out. |
 | `MixerIOProc.swift` | The real-time callback. Channel mapping, gain, mixing, RMS. |
 | `RouteWatchdog.swift` | Detects the zero-buffer failure and asks the owner to rebuild. Counters are lock-guarded; the recovery budget is seeded by the owner. |
-| `AudioDeviceManager.swift` | Device enumeration, device-list **and default-output/input** listeners, volume/mute. Volume and mute take a `scope:` — the same selectors address playback and capture. |
+| `AudioDeviceManager.swift` | Device enumeration, device-list **and default-output/input** listeners, **device-scoped volume/mute listeners** (`observeLevels`), volume/mute. Volume and mute take a `scope:` — the same selectors address playback and capture. |
 | `TapPermission.swift` | TCC state. Screen-capture preflight, **not** tap success. |
 | `Sources/SoundFlowApp/` | The app. |
 | `MixerEngine.swift` | `@MainActor @Observable`. Owns `AppMix` list, prefs, and the route. The only place that decides what gets tapped. |
@@ -166,15 +166,27 @@ or a crash — rarely a compile error.
     recycled as hardware comes and goes.
 
 14. **Reading a device's level must not write it back.** `masterVolume` and
-    `inputVolume` push to the hardware in `didSet`, so copying a device's own
-    level into them re-writes it — and a device with no readable volume gets
-    forced to 100%. Every such read goes through `readDeviceVolume { }`.
+    `inputVolume` are `private(set)`: `setMasterVolume(_:)` / `setInputVolume(_:)`
+    write both the hardware and the published value, and the refresh path
+    (`readOutputLevel()` / `readInputLevel()`) only ever assigns. They used to be
+    settable with a `didSet` that pushed to the hardware, which made every
+    assignment a write — so copying a device's own level *in* bounced it back
+    out, and a device with no readable volume got forced to 100%. The split is
+    what keeps that unexpressible; do not re-add a `didSet`.
 
-15. **Selection binds to `AudioObjectID`, never to a device name.** Names are not
+15. **The master slider is the Mac's own volume, and sync runs both ways.** It
+    is not a SoundFlow gain stage and has nothing to do with the taps.
+    `AudioDeviceManager.observeLevels()` must be re-called whenever a default
+    device changes, or the app silently stops tracking the volume keys — the
+    listeners are bound to an `AudioObjectID` and ids get recycled. Writing the
+    scalar makes the HAL notify straight back; `lastWrittenMasterVolume` absorbs
+    that echo so a drag is not yanked to the hardware's quantised value.
+
+16. **Selection binds to `AudioObjectID`, never to a device name.** Names are not
     unique (two identical interfaces) and can read "Unknown", which leaves the
     picker blank.
 
-16. **One app owns several process objects, so collapse by union.** Chromium and
+17. **One app owns several process objects, so collapse by union.** Chromium and
     Electron apps play from a helper that reports the parent's bundle id, and
     `kAudioHardwarePropertyProcessObjectList` has no defined order.
     `groupByBundle()` therefore ORs `IsRunningOutput` across the whole group and
@@ -183,14 +195,14 @@ or a crash — rarely a compile error.
     a silent main process sorting first made `isPlaying` false while a playing
     helper sat beside it, and the indicator stayed dark for seconds.
 
-17. **The HAL notifies on the main run loop unless told not to.** Left alone,
+18. **The HAL notifies on the main run loop unless told not to.** Left alone,
     every property listener is a main run-loop source in the *default* mode, so
     it stops being delivered while a menu or the `MenuBarExtra` popover holds
     the run loop in tracking mode. `caDetachNotificationRunLoop()` must run
     before any listener is installed. Both listener procs already assume a HAL
     thread; this is what makes that true.
 
-18. **Permission granted while running must call `syncRoute()`.**
+19. **Permission granted while running must call `syncRoute()`.**
     `refreshPermission()` runs on every activation; without the sync the UI
     unblocks after the user returns from System Settings and the sliders do
     nothing until the process list happens to change.
@@ -211,6 +223,8 @@ or a crash — rarely a compile error.
 | Change how an app's icon is generated | `AppIcon.swift` (`GeneratedIcon.hues` / `automaticHue`) |
 | Change login-item behaviour | `LaunchAtLogin.swift` — needs a signed bundle to register |
 | Change the volume curve | `MixerIOProc.setVolume(slot:sliderValue:)` — currently squared |
+| Change the master (system) volume behaviour | `MixerEngine.setMasterVolume(_:)` / `readOutputLevel()` — the Mac's own level, not a SoundFlow gain stage |
+| Debug "the master slider is stale" | `log stream --predicate 'subsystem == "com.soundflow.app" and category == "devices"' --level debug` should print on every volume key press |
 | Change tap/route lifecycle | `MixerEngine.syncRoute()` — the single decision point |
 | React to a new system event | Add a listener in `AudioDeviceManager`, route it into `MixerEngine` — see the trigger table in `docs/ARCHITECTURE.md` §2 |
 | Debug "no audio" | `MixerIOProc.diagnostics` (set `measuresInputPeak` first), then `./scripts/run-spike.sh --selftest` |

@@ -157,6 +157,17 @@ public class AudioDeviceManager: @unchecked Sendable {
     public var onDefaultOutputChanged: (@Sendable () -> Void)?
     /// Fired on the main queue when the system default *input* changes.
     public var onDefaultInputChanged: (@Sendable () -> Void)?
+    /// Fired on the main queue when the default **output device's own level or
+    /// mute** changes — the volume keys, Control Center, the Sound pane, or
+    /// another app.
+    ///
+    /// The selectors above live on the system object and say nothing about a
+    /// level. Without this the app's master slider only ever refreshed when the
+    /// device list or the default device changed, so turning the Mac up with the
+    /// keyboard left it displaying whatever it last happened to read.
+    public var onOutputLevelChanged: (@Sendable () -> Void)?
+    /// The same for the default input device's gain and mute.
+    public var onInputLevelChanged: (@Sendable () -> Void)?
 
     /// The hardware properties worth watching, all on the system object.
     private static let monitoredSelectors: [AudioObjectPropertySelector] = [
@@ -169,6 +180,11 @@ public class AudioDeviceManager: @unchecked Sendable {
     private var listenerContext: UnsafeMutableRawPointer?
     /// Selectors actually registered, so a partial failure still unwinds cleanly.
     private var registeredSelectors: [AudioObjectPropertySelector] = []
+    /// Device-scoped level listeners, kept as whole addresses: unlike the
+    /// system-object set these vary per device — element numbers included — so
+    /// the selector alone is not enough to remove one again.
+    private var registeredLevelListeners: [(deviceID: AudioObjectID,
+                                            address: AudioObjectPropertyAddress)] = []
     private let listenerLock = NSLock()
 
     /// Start listening for HAL device add/remove and default-device events.
@@ -211,6 +227,56 @@ public class AudioDeviceManager: @unchecked Sendable {
         registeredSelectors = registered
     }
 
+    /// Watches the current default output and input devices' own volume and mute.
+    ///
+    /// Call again whenever either default device changes: these listeners are
+    /// scoped to a specific `AudioObjectID`, and ids are recycled as hardware
+    /// comes and goes, so one left on the old device is worse than none.
+    /// Re-registering is what keeps the master slider live across a device swap.
+    ///
+    /// The listener set is derived from `volumeAddresses(scope:)` — the same
+    /// helper the read path uses — filtered to what the device actually has. It
+    /// has to match: this Mac's speakers answer only the main element, while
+    /// plenty of interfaces expose only the per-channel ones, and a listener on
+    /// an address the device does not implement is silently never delivered.
+    public func observeLevels(outputDeviceID: AudioObjectID, inputDeviceID: AudioObjectID) {
+        listenerLock.lock()
+        defer { listenerLock.unlock() }
+        guard let selfPtr = listenerContext else { return }
+
+        removeLevelListeners(selfPtr)
+
+        for (deviceID, scope) in [(outputDeviceID, kAudioObjectPropertyScopeOutput),
+                                  (inputDeviceID, kAudioObjectPropertyScopeInput)] {
+            guard deviceID != kAudioObjectUnknown else { continue }
+
+            var addresses = volumeAddresses(scope: scope)
+            addresses.append(AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyMute,
+                mScope: scope,
+                mElement: kAudioObjectPropertyElementMain))
+
+            for var address in addresses {
+                guard AudioObjectHasProperty(deviceID, &address) else { continue }
+                let status = AudioObjectAddPropertyListener(
+                    deviceID, &address, hardwareListener, selfPtr)
+                if status == noErr {
+                    registeredLevelListeners.append((deviceID, address))
+                }
+            }
+        }
+    }
+
+    /// Caller holds `listenerLock`.
+    private func removeLevelListeners(_ selfPtr: UnsafeMutableRawPointer) {
+        for entry in registeredLevelListeners {
+            var address = entry.address
+            AudioObjectRemovePropertyListener(
+                entry.deviceID, &address, hardwareListener, selfPtr)
+        }
+        registeredLevelListeners = []
+    }
+
     /// Stop listening, removing every listener and balancing its retain. The
     /// original implementation did neither, so each start/stop cycle leaked the
     /// manager and left a live callback behind.
@@ -229,6 +295,7 @@ public class AudioDeviceManager: @unchecked Sendable {
                 AudioObjectID(kAudioObjectSystemObject), &address, hardwareListener, selfPtr)
         }
         registeredSelectors = []
+        removeLevelListeners(selfPtr)
         listenerContext = nil
 
         Unmanaged<AudioDeviceManager>.fromOpaque(selfPtr).release()
@@ -236,12 +303,24 @@ public class AudioDeviceManager: @unchecked Sendable {
 
     /// Routes a HAL notification to the matching callback. Runs on a HAL thread,
     /// so it only hops to main and returns.
-    fileprivate func notify(selector: AudioObjectPropertySelector) {
+    ///
+    /// Level notifications are told apart by **scope**, not by selector: the
+    /// same `VolumeScalar` arrives for an output and an input, and one USB
+    /// interface can be both the default output and the default input at once.
+    fileprivate func notify(selector: AudioObjectPropertySelector,
+                            scope: AudioObjectPropertyScope) {
         let handler: (@Sendable () -> Void)?
         switch selector {
         case kAudioHardwarePropertyDevices:             handler = onDeviceListChanged
         case kAudioHardwarePropertyDefaultOutputDevice: handler = onDefaultOutputChanged
         case kAudioHardwarePropertyDefaultInputDevice:  handler = onDefaultInputChanged
+        case kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+             kAudioDevicePropertyVolumeScalar,
+             kAudioDevicePropertyMute:
+            // A device answering both the virtual-main selector and the scalar
+            // fires twice. Harmless: the handler is an idempotent re-read.
+            handler = scope == kAudioObjectPropertyScopeInput ? onInputLevelChanged
+                                                              : onOutputLevelChanged
         default:                                        return
         }
         guard let handler else { return }
@@ -446,7 +525,8 @@ private let hardwareListener: AudioObjectPropertyListenerProc = { _, count, addr
     guard let clientData else { return noErr }
     let manager = Unmanaged<AudioDeviceManager>.fromOpaque(clientData).takeUnretainedValue()
     for index in 0..<Int(count) {
-        manager.notify(selector: addresses[index].mSelector)
+        manager.notify(selector: addresses[index].mSelector,
+                       scope: addresses[index].mScope)
     }
     return noErr
 }

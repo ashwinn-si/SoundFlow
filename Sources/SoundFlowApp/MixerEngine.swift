@@ -11,6 +11,7 @@ import SoundFlowCore
 /// a missing callback is otherwise indistinguishable from nothing happening.
 enum SoundFlowLog {
     static let registry = Logger(subsystem: "com.soundflow.app", category: "registry")
+    static let devices = Logger(subsystem: "com.soundflow.app", category: "devices")
 }
 
 // MARK: - AppMix
@@ -151,34 +152,26 @@ final class MixerEngine {
     /// Set when the route cannot be built, so the UI can explain itself.
     private(set) var routeError: String?
 
-    var masterVolume: Float = 1.0 {
-        didSet {
-            guard !isReadingDeviceVolume else { return }
-            guard abs(masterVolume - oldValue) > 0.0001 else { return }
-            deviceManager.setMasterVolume(masterVolume, deviceID: outputDeviceID)
-        }
-    }
+    /// The default **output device's own** level — the same value the volume
+    /// keys and Control Center move. Not a SoundFlow gain stage: this is the
+    /// hardware's control, and the two are kept as one number in both
+    /// directions.
+    ///
+    /// `private(set)` on purpose. It used to be settable with a `didSet` that
+    /// pushed to the hardware, which meant every assignment was also a write —
+    /// so copying a device's own level *in* bounced it straight back out, and
+    /// the only thing standing between that and a device being forced to 100%
+    /// was a `isReadingDeviceVolume` flag every reader had to remember. Now the
+    /// two directions are separate methods and the hazard cannot be expressed.
+    private(set) var masterVolume: Float = 1.0
+    private(set) var isOutputMuted: Bool = false
 
     var hasMasterVolumeControl: Bool = true
 
     /// Input gain for the default capture device. Separate from `masterVolume`
     /// because the same selectors address playback and capture by scope.
-    var inputVolume: Float = 1.0 {
-        didSet {
-            guard !isReadingDeviceVolume else { return }
-            guard abs(inputVolume - oldValue) > 0.0001 else { return }
-            deviceManager.setMasterVolume(inputVolume,
-                                          deviceID: inputDeviceID,
-                                          scope: kAudioObjectPropertyScopeInput)
-        }
-    }
-
-    /// Set while a device's own level is being copied *into* the published
-    /// property. Without it the `didSet` immediately writes the value back to
-    /// the hardware, so simply refreshing the device list — which the HAL can
-    /// trigger at any time — stomps the level the user set elsewhere, and a
-    /// device with no readable volume gets forced to 100%.
-    private var isReadingDeviceVolume = false
+    private(set) var inputVolume: Float = 1.0
+    private(set) var isInputMuted: Bool = false
 
     /// Plenty of microphones expose no settable gain, so the slider hides.
     var hasInputVolumeControl: Bool = true
@@ -267,7 +260,21 @@ final class MixerEngine {
         deviceManager.onDefaultInputChanged = { [weak self] in
             Task { @MainActor in self?.refreshInputState() }
         }
+        // The volume keys, Control Center and the Sound pane all change a
+        // device's own level without touching any of the selectors above. These
+        // are what keep the master slider from going stale — the app used to
+        // sit at whatever it last read while the Mac was somewhere else
+        // entirely.
+        deviceManager.onOutputLevelChanged = { [weak self] in
+            Task { @MainActor in self?.readOutputLevel() }
+        }
+        deviceManager.onInputLevelChanged = { [weak self] in
+            Task { @MainActor in self?.readInputLevel() }
+        }
         deviceManager.startMonitoringDeviceChanges()
+        // After the listener context exists: `observeLevels` needs it, and the
+        // `refreshDevices()` above ran before there was one.
+        observeDeviceLevels()
 
         observeWorkspace()
     }
@@ -387,9 +394,10 @@ final class MixerEngine {
         outputDeviceName = outputDevices.first { $0.id == outputDeviceID }?.name ?? "Unknown"
 
         hasMasterVolumeControl = deviceManager.hasSettableVolume(deviceID: outputDeviceID)
-        readDeviceVolume {
-            masterVolume = deviceManager.getMasterVolume(deviceID: outputDeviceID) ?? 1.0
-        }
+        readOutputLevel()
+        // The old device's listeners are useless now, and ids get recycled, so
+        // one left behind is worse than none.
+        observeDeviceLevels()
 
         // Everything routed through the old device has to be rebuilt.
         guard previousUID != outputDeviceUID else { return }
@@ -406,18 +414,112 @@ final class MixerEngine {
 
         hasInputVolumeControl = deviceManager.hasSettableVolume(
             deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput)
-        readDeviceVolume {
-            inputVolume = deviceManager.getMasterVolume(
-                deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput) ?? 1.0
-        }
+        readInputLevel()
+        observeDeviceLevels()
     }
 
-    /// Copies a hardware level into a published property without the `didSet`
-    /// bouncing it straight back to the hardware.
-    private func readDeviceVolume(_ body: () -> Void) {
-        isReadingDeviceVolume = true
-        defer { isReadingDeviceVolume = false }
-        body()
+    private func observeDeviceLevels() {
+        deviceManager.observeLevels(outputDeviceID: outputDeviceID,
+                                    inputDeviceID: inputDeviceID)
+    }
+
+    // MARK: - Device level
+
+    /// The last scalar we wrote to the output device, so the notification our
+    /// own write provokes can be told from someone else's change. See
+    /// `readOutputLevel()`.
+    private var lastWrittenMasterVolume: Float?
+    private var lastWrittenInputVolume: Float?
+
+    /// Copies the output device's own level and mute into the published state.
+    ///
+    /// Reading never writes: that is the whole point of the split, and a device
+    /// with no readable volume must not be forced to 100% just because someone
+    /// refreshed the device list.
+    ///
+    /// The echo check is cosmetic, not correctness. Writing the scalar makes the
+    /// HAL notify us straight back, and the value that comes back is quantised
+    /// to whatever the hardware actually accepted — so mid-drag it yanks the
+    /// thumb out from under the pointer. Ignoring a value that matches what we
+    /// just wrote leaves the drag smooth without ever suppressing a real change.
+    private func readOutputLevel() {
+        guard outputDeviceID != kAudioObjectUnknown else { return }
+
+        var level = masterVolume
+        if let hardware = deviceManager.getMasterVolume(deviceID: outputDeviceID) {
+            if let written = lastWrittenMasterVolume, abs(hardware - written) < 0.01 {
+                // Our own echo. Keep the value the user is dragging.
+            } else {
+                level = hardware
+                lastWrittenMasterVolume = nil
+            }
+        }
+        let muted = deviceManager.isMuted(deviceID: outputDeviceID) ?? false
+
+        // One change arrives several times: a device that answers both the
+        // virtual-main selector and the scalar notifies on each, and holding a
+        // volume key produces a stream of them. Assigning an unchanged value to
+        // an `@Observable` property still invalidates every view reading it, so
+        // the comparison is what keeps a key-repeat from re-rendering the mixer
+        // four times per step.
+        guard level != masterVolume || muted != isOutputMuted else { return }
+        masterVolume = level
+        isOutputMuted = muted
+        SoundFlowLog.devices.debug("output level: \(Int(level * 100), privacy: .public)%\(muted ? " muted" : "", privacy: .public)")
+    }
+
+    private func readInputLevel() {
+        guard inputDeviceID != kAudioObjectUnknown else { return }
+
+        var level = inputVolume
+        if let hardware = deviceManager.getMasterVolume(
+            deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput) {
+            if let written = lastWrittenInputVolume, abs(hardware - written) < 0.01 {
+                // Our own echo.
+            } else {
+                level = hardware
+                lastWrittenInputVolume = nil
+            }
+        }
+        let muted = deviceManager.isMuted(
+            deviceID: inputDeviceID, scope: kAudioObjectPropertyScopeInput) ?? false
+
+        guard level != inputVolume || muted != isInputMuted else { return }
+        inputVolume = level
+        isInputMuted = muted
+        SoundFlowLog.devices.debug("input level: \(Int(level * 100), privacy: .public)%\(muted ? " muted" : "", privacy: .public)")
+    }
+
+    /// Moves the Mac's own output volume. The published value and the hardware
+    /// are one number — this is the only place that writes both.
+    func setMasterVolume(_ value: Float) {
+        let clamped = max(0, min(1, value))
+        guard abs(clamped - masterVolume) > 0.0001 else { return }
+        masterVolume = clamped
+        lastWrittenMasterVolume = clamped
+        deviceManager.setMasterVolume(clamped, deviceID: outputDeviceID)
+    }
+
+    func setInputVolume(_ value: Float) {
+        let clamped = max(0, min(1, value))
+        guard abs(clamped - inputVolume) > 0.0001 else { return }
+        inputVolume = clamped
+        lastWrittenInputVolume = clamped
+        deviceManager.setMasterVolume(clamped,
+                                      deviceID: inputDeviceID,
+                                      scope: kAudioObjectPropertyScopeInput)
+    }
+
+    func setOutputMuted(_ muted: Bool) {
+        isOutputMuted = muted
+        deviceManager.setMuted(muted, deviceID: outputDeviceID)
+    }
+
+    func setInputMuted(_ muted: Bool) {
+        isInputMuted = muted
+        deviceManager.setMuted(muted,
+                               deviceID: inputDeviceID,
+                               scope: kAudioObjectPropertyScopeInput)
     }
 
     // MARK: - App list
