@@ -149,6 +149,42 @@ routed and still needs a tap, it writes gain straight into the slot and skips
 > `log stream --predicate 'subsystem == "com.soundflow.app"' --level debug`
 > should print a line the moment you press play in any app.
 
+> **The HAL notifies on the main run loop unless told otherwise.** From
+> `AudioHardwareDeprecated.h`, on `kAudioHardwarePropertyRunLoop`: *"In 10.6 and
+> later, the HAL will use the process's run loop (as defined by
+> `CFRunLoopGetMain()`) for this task. […] If the value for this property is set
+> to NULL, the HAL will return to its pre-10.6 behavior of creating and managing
+> its own thread for notifications."*
+>
+> Every listener above was therefore a main run-loop source in the **default
+> mode**, which means it stopped being delivered whenever anything held the run
+> loop in another mode — a tracking menu, or an open `MenuBarExtra` popover.
+> That is the app's primary surface: playback could start with the mixer on
+> screen and nothing fired until the popover closed.
+>
+> `caDetachNotificationRunLoop()` sets the property to NULL once per process,
+> and both `AudioProcessRegistry.startMonitoring()` and
+> `AudioDeviceManager.startMonitoringDeviceChanges()` call it before installing
+> anything. Both listener procs were already written for a HAL thread — they
+> read one field and hop to main. This makes that true rather than aspirational.
+
+**One refresh per burst.** Every process object carries its own
+`IsRunningOutput` listener and they share one C proc, so a single play event
+routinely fires several. `notifyChanged()` collapses a burst into one main-queue
+hop with a pending flag cleared *before* the callback runs — so it costs one
+`refreshApps()`, and anything that changes during a refresh still schedules the
+next one. Without it each notification paid for a full `snapshot()` (three IPC
+property reads per process on the system) and a route reconciliation.
+
+**What the HAL is not fast at.** Measured on macOS 15 with a signed build:
+`IsRunningOutput` going 0 → 1 reaches the listener in **~150–400 ms**, but going
+1 → 0 took **~8 s**. The lag is entirely coreaudiod's and the app's — an app
+that pauses does not necessarily stop its IOProc, and the HAL tears the state
+down lazily. Polling does not beat it (the poll and the listener saw the same
+transition 16 ms apart). Do not add machinery trying to: a playing indicator
+that lingers briefly after a pause is the honest reading of the only signal the
+system offers.
+
 The default-device listeners are separate from the device-list listener on
 purpose. Picking a different *existing* device in Control Center or the Sound
 pane adds and removes nothing, so `kAudioHardwarePropertyDevices` never fires
@@ -174,9 +210,10 @@ but only after three seconds of silence and only if something is playing.
 | :--- | :--- | :--- |
 | Main actor | `MixerEngine`, `AppMix`, all SwiftUI | Everything observable lives here. |
 | CoreAudio IO thread | `mixerIOProc` | **Real-time.** No allocation, no locks, no Swift runtime, no logging. POD memory only. |
-| HAL listener threads | `registryListener`, device listeners | Hop to main immediately and return. |
+| HAL listener threads | `registryListener`, device listeners | Hop to main immediately and return. Genuinely HAL-owned only because `caDetachNotificationRunLoop()` runs first — see §2. |
 | Watchdog thread | `RouteWatchdog.poll()` | `.utility` QoS. Never reads main-actor state. Counters live behind an `OSAllocatedUnfairLock` — `stop()`, `noteRebuilt()` and `recoveryAttempts` are all called from the owner's thread. |
 | Watchdog feed timer | `updateWatchdogExpectation()` every 0.5 s | Main actor. Caches "expecting audio" for the watchdog. **Runs only while a route exists** — started by `syncRoute()`, stopped by `teardownRoute()`. |
+| Playback poll | `pollPlaybackState()` every 0.5 s | Main actor. Backstop under the `IsRunningOutput` listeners. **Runs only while a mixer surface is on screen** — refcounted by `MixerView`'s `onAppear`/`onDisappear`, and it stops itself if no window is visible. |
 
 Two crossings deserve attention:
 
@@ -301,19 +338,44 @@ Reading a tap's name needs care: `kAudioTapPropertyDescription` returns a
 
 ### `AppMix`
 
-One row in the mixer, keyed by **bundle id**. A single app can own several audio
-processes (browser helpers), so `refreshApps()` collapses them — first process
-wins, one row per app. `describe(process:bundleID:)` resolves a name and icon
-from `NSRunningApplication`, falling back to a disk lookup via `NSWorkspace`;
+One row in the mixer, keyed by **bundle id**. A single app routinely owns several
+audio process objects — Chromium and Electron apps (Chrome, Arc, Spotify,
+Discord, Slack) play from a helper process that reports the *parent's* bundle id
+— so `groupByBundle(_:)` collapses them into one row.
+
+**How they are collapsed is load-bearing.** `refreshApps()` used to keep the
+first process it saw and discard the rest, and that was a real bug:
+`kAudioHardwarePropertyProcessObjectList` has no defined order, so when a silent
+main process sorted ahead of a playing helper its `IsRunningOutput` of `0`
+became the row's answer. The indicator stayed dark for seconds — until the list
+happened to reorder or the idle object was torn down — while every notification
+in between arrived on time and was thrown away.
+
+So `isPlaying` is the **union** across the group, and the representative process
+— the one the tap is built on — is whichever member is actually producing
+output, falling back to the first. That second half also satisfies invariant 2
+better than first-wins did: the tap lands on the process emitting the audio
+rather than an idle sibling. `AppMix.processObjectIDs` keeps the whole group, so
+the playback poll can re-read it without re-enumerating the HAL.
+
+`describe(process:bundleID:)` resolves a name and icon from
+`NSRunningApplication`, falling back to a disk lookup via `NSWorkspace`;
 anything that resolves to neither is skipped, which is what keeps daemons and
-XPC helpers out of the list.
+XPC helpers out of the list. The `NSRunningApplication` half is always asked
+fresh — it is an in-memory query, and it is the answer that must not be stale.
+The `NSWorkspace` half is memoised by bundle id, negatives included, because it
+reaches LaunchServices and then the disk and used to run for every unresolved
+process on every refresh. Negatives are dropped on
+`NSWorkspace.didLaunchApplicationNotification`: an app that was not installed
+when we asked is the only way one becomes wrong.
 
 | Field | Notes |
 | :--- | :--- |
 | `volume`, `isMuted` | Persisted. Drive `needsTap`. |
 | `needsTap` | `isActive && !isDRMProtected && (isMuted \|\| volume < 0.999)` |
 | `isActive` | `false` for a starred app with no live CoreAudio process. No process object, so it can never be tapped. |
-| `isPlaying` | From the HAL's `IsRunningOutput`. Drives the sidebar's **Playing** filter, the row's playing indicator, and the sort. It is only as live as the per-process listener that feeds it — see below. |
+| `isPlaying` | The union of `IsRunningOutput` across **every** process object with this bundle id. Drives the sidebar's **Playing** filter, the row's playing indicator, and the sort. It is only as live as the per-process listeners that feed it — see below. |
+| `isSilenced` | `isMuted \|\| volume < 0.01`. Playing, but nothing of it reaches the speakers. Display-only: it flattens the indicator and has no bearing on the route, which `needsTap` decides. |
 | `isDRMProtected` | Set by tap failure. Disables the controls. |
 | `isFavorite` | Persisted. **Display filter only.** |
 | `customName` / `displayName` | Persisted override. UI must read `displayName`. |
@@ -399,6 +461,22 @@ silent about the one thing it exists to say.
 
 The replacement animates identically for every playing app, tapped or not, and
 reads nothing from the audio path.
+
+**The flat state is not a return to that.** An app with `isSilenced` set draws a
+single dimmed line instead of the bars: it is still producing audio, and the
+user is hearing none of it. That comes from `volume` and `isMuted` — the user's
+own setting — so it is exact, and it is the one thing the pulse cannot say.
+`isPlaying` is upstream of our gain stage, so without it a muted app animated
+exactly like an audible one.
+
+Two details are deliberate. The flat state is **one capsule, not four squashed
+bars**: at flat height the separate bars read as dots beside the name, which is
+the exact failure above. And it is a *branch between two subviews* rather than a
+frozen version of one — the pulse is a `repeatForever` keyed on a one-shot
+`@State` flip in `onAppear`, so flattening by setting that flag back would run
+the stop through the same repeating curve. Destroying the animated view ends it
+outright, and rebuilding it restarts the loop cleanly. The container is pinned
+to the bars' natural 16 × 14pt footprint so nothing shifts either way.
 
 ### Persistence
 
@@ -517,6 +595,18 @@ macOS coalesces aggressively, so removing the original 12.5 Hz timer only bought
 about 1 wakeup/s. The remaining 5.7/s is SwiftUI, the `MenuBarExtra` and the HAL
 listeners. One lever named in the original analysis is still unused: suspend the
 feed when neither the window nor the popover is visible.
+
+**The playback poll pays that lever forward.** It is a second 0.5 s timer, but it
+is bracketed by visibility rather than by the route: `MixerView`'s
+`onAppear`/`onDisappear` refcount it, and `pollPlaybackState()` also stops itself
+if `NSApp` has no visible window, so a `MenuBarExtra` popover that never delivers
+`onDisappear` cannot leave it running. A SoundFlow sitting in the menu bar with
+nothing open runs no timer at all, which is the state it spends its day in.
+
+Per tick it reads one `UInt32` per process object already in `apps` — no
+`snapshot()`, which re-enumerates the HAL and reads a pid and a bundle id for
+every process on the system, and no `describe()`. When nothing changed it
+publishes nothing, so the common case costs the reads and no SwiftUI work.
 
 `ProcessTapEngine` and `MixerIOProc` are arm-friendly: the callback touches only
 POD memory, allocates nothing, and takes no locks. The one piece of avoidable

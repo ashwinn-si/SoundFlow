@@ -28,11 +28,19 @@ public struct AudioProcessInfo: Identifiable, Sendable, Hashable {
 /// answer to "who is playing audio", so it is the correct source of truth.
 public final class AudioProcessRegistry: @unchecked Sendable {
 
-    /// Fired on the main queue when processes appear, disappear, or start/stop output.
-    public var onChange: (@Sendable () -> Void)?
+    /// Fired on the main queue when processes appear, disappear, or start/stop
+    /// output. Lock-guarded: the listeners that read it run on a HAL thread.
+    public var onChange: (@Sendable () -> Void)? {
+        get { lock.withLock { changeHandler } }
+        set { lock.withLock { changeHandler = newValue } }
+    }
+    private var changeHandler: (@Sendable () -> Void)?
 
     private var isListening = false
     private var listenerContext: UnsafeMutableRawPointer?
+    /// A main-queue hop is already scheduled, so further notifications in this
+    /// burst have nothing left to ask for.
+    private var notificationPending = false
 
     /// Process objects we have installed an `IsRunningOutput` listener on.
     private var observedProcesses: Set<AudioObjectID> = []
@@ -96,6 +104,15 @@ public final class AudioProcessRegistry: @unchecked Sendable {
         caProcessObject(forPID: pid)
     }
 
+    /// Whether a single process object has an active output stream.
+    ///
+    /// One property read, deliberately: this is what a caller polls with when it
+    /// wants playback state without paying for `snapshot()`, which re-enumerates
+    /// the HAL and reads a pid and a bundle id for every process on the system.
+    public func isRunningOutput(_ objectID: AudioObjectID) -> Bool {
+        (caValue(objectID, caAddress(kAudioProcessPropertyIsRunningOutput), UInt32(0)) ?? 0) != 0
+    }
+
     // MARK: - Change monitoring
 
     /// Installs a listener on the process list, and one on every process that
@@ -112,6 +129,11 @@ public final class AudioProcessRegistry: @unchecked Sendable {
     /// the same `NSLock`, which is not recursive, so holding it across the call
     /// would deadlock on launch.
     public func startMonitoring() {
+        // Before any listener exists: otherwise these callbacks are main
+        // run-loop sources and stall whenever a menu or the menu bar popover
+        // holds the run loop in tracking mode.
+        caDetachNotificationRunLoop()
+
         lock.lock()
 
         guard !isListening else {
@@ -191,9 +213,32 @@ public final class AudioProcessRegistry: @unchecked Sendable {
         }
     }
 
+    /// Hops to main, once per burst.
+    ///
+    /// Every process object carries its own `IsRunningOutput` listener and they
+    /// share this one C proc, so a single play event routinely fires several —
+    /// and each hop used to run a full `refreshApps()`, which re-reads three
+    /// properties per process over IPC and then reconciles the route. The flag
+    /// collapses a burst into one refresh without delaying it: it is cleared
+    /// before the callback runs, so anything that changes *during* a refresh
+    /// still schedules the next one.
     fileprivate func notifyChanged() {
-        let callback = onChange
-        DispatchQueue.main.async { callback?() }
+        lock.lock()
+        guard !notificationPending else {
+            lock.unlock()
+            return
+        }
+        notificationPending = true
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.notificationPending = false
+            let callback = self.changeHandler
+            self.lock.unlock()
+            callback?()
+        }
     }
 }
 

@@ -47,6 +47,12 @@ struct MixerView: View {
                 .tint(theme.accent)
                 .environment(\.themeAccent, theme.accent)
         }
+        // The playing indicator is driven by HAL notifications; this is the
+        // backstop under them, and it only needs to run while a row is on
+        // screen to be seen going stale. Refcounted in the engine, because the
+        // window and the menu bar popover can both be open.
+        .onAppear { engine.beginObservingPlayback() }
+        .onDisappear { engine.endObservingPlayback() }
     }
 
     // MARK: - Main window

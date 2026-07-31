@@ -30,8 +30,9 @@ struct AppRowView: View {
                     }
 
                     if app.isPlaying {
-                        PlayingIndicator()
-                            .accessibilityLabel("Playing")
+                        PlayingIndicator(isSilenced: app.isSilenced)
+                            .accessibilityLabel(app.isSilenced ? "Playing, silenced"
+                                                              : "Playing")
                     }
 
                     Spacer(minLength: 0)
@@ -207,7 +208,8 @@ struct AppRowView: View {
 
 // MARK: - PlayingIndicator
 
-/// Four bars pulsing on a loop, marking an app that is producing audio.
+/// Marks an app that is producing audio: pulsing bars normally, one flat line
+/// when the user has silenced it.
 ///
 /// Deliberately **not** driven by the audio level, which is what the previous
 /// version did and why it was replaced. Only a tapped app produces RMS, and
@@ -217,9 +219,46 @@ struct AppRowView: View {
 /// exactly the apps the user has not touched is worse than no meter: it looks
 /// broken, and it is silent about the one thing it is there to say.
 ///
-/// This says only "this app is playing", and says it the same way for every
-/// app.
+/// The flat state is not a return to that. It comes from `volume` and `isMuted`
+/// — the user's own setting — and never from the audio path, so it is exact and
+/// it means something the pulse cannot say: this app is still playing, and you
+/// are hearing none of it.
 struct PlayingIndicator: View {
+
+    /// Playing, but turned all the way down. See `AppMix.isSilenced`.
+    let isSilenced: Bool
+
+    @Environment(\.themeAccent) private var accent
+
+    var body: some View {
+        ZStack {
+            if isSilenced {
+                // One line rather than four squashed bars: at flat height the
+                // separate capsules read as dots beside the name, which is the
+                // exact failure the meter version was replaced for.
+                Capsule()
+                    .fill(accent)
+                    .frame(height: 2.5)
+                    .opacity(0.55)
+            } else {
+                PulsingBars()
+            }
+        }
+        // Pinned to the bars' natural footprint (4 × 2.5pt + 3 × 2pt gaps), so
+        // flattening never shifts the name or the percentage beside it.
+        .frame(width: 16, height: 14)
+        .opacity(0.9)
+        .animation(.easeInOut(duration: 0.15), value: isSilenced)
+    }
+}
+
+/// The animated half, split out so silencing *destroys* it.
+///
+/// The loop is a `repeatForever` keyed on a one-shot `@State` flip in
+/// `onAppear`. Flattening by setting that flag back to `false` would run the
+/// stop through the same repeating curve; tearing the view down instead ends
+/// the animation outright, and building it again restarts the loop cleanly.
+private struct PulsingBars: View {
 
     @Environment(\.themeAccent) private var accent
     @State private var isAnimating = false
@@ -247,7 +286,6 @@ struct PlayingIndicator: View {
             }
         }
         .frame(height: 14)
-        .opacity(0.9)
         .onAppear { isAnimating = true }
     }
 }
