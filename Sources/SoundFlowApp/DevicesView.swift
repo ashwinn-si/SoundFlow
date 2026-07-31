@@ -24,7 +24,11 @@ struct DevicesView: View {
                             symbol: "speaker.fill",
                             value: Binding(
                                 get: { Double(engine.masterVolume) },
-                                set: { engine.masterVolume = Float($0) }
+                                set: { engine.setMasterVolume(Float($0)) }
+                            ),
+                            isMuted: Binding(
+                                get: { engine.isOutputMuted },
+                                set: { engine.setOutputMuted($0) }
                             )
                         )
                     } else {
@@ -52,7 +56,11 @@ struct DevicesView: View {
                                 symbol: "mic.fill",
                                 value: Binding(
                                     get: { Double(engine.inputVolume) },
-                                    set: { engine.inputVolume = Float($0) }
+                                    set: { engine.setInputVolume(Float($0)) }
+                                ),
+                                isMuted: Binding(
+                                    get: { engine.isInputMuted },
+                                    set: { engine.setInputMuted($0) }
                                 )
                             )
                         } else {
@@ -139,16 +147,30 @@ struct DevicesView: View {
 
 /// A labelled 0–100% slider. Shared by the device cards and the mixer's own
 /// master row so they stay visually identical.
+///
+/// The leading glyph becomes a mute button when `isMuted` is supplied. That is
+/// the device's own mute — the same one F10 toggles — so it has to be here
+/// rather than implied by a level of zero: muting does not change the scalar,
+/// and a slider sitting at 81% for a silent Mac is a lie.
 struct LevelSlider: View {
     let symbol: String
     @Binding var value: Double
+    var isMuted: Binding<Bool>?
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .frame(width: 14)
+            if let isMuted {
+                Button {
+                    isMuted.wrappedValue.toggle()
+                } label: {
+                    glyph(muted: isMuted.wrappedValue)
+                }
+                .buttonStyle(.borderless)
+                .help(isMuted.wrappedValue ? "Unmute" : "Mute")
+                .accessibilityLabel(isMuted.wrappedValue ? "Unmute" : "Mute")
+            } else {
+                glyph(muted: false)
+            }
 
             Slider(value: $value, in: 0...1)
                 .controlSize(.small)
@@ -157,6 +179,22 @@ struct LevelSlider: View {
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 34, alignment: .trailing)
+                // Muted is the state the number cannot express on its own.
+                .opacity(isMuted?.wrappedValue == true ? 0.4 : 1)
         }
+    }
+
+    /// Same threshold ladder as `AppRowView.muteSymbol`, so a device row and an
+    /// app row never disagree about what a given level looks like. The caller's
+    /// `symbol` is the unmuted shape for anything that is not a speaker.
+    private func glyph(muted: Bool) -> some View {
+        Image(systemName: muted ? mutedSymbol : symbol)
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .frame(width: 14)
+    }
+
+    private var mutedSymbol: String {
+        symbol.hasPrefix("mic") ? "mic.slash.fill" : "speaker.slash.fill"
     }
 }

@@ -127,6 +127,8 @@ routed and still needs a tap, it writes gain straight into the slot and skips
 | A device is plugged in or removed | `onDeviceListChanged` → `refreshDevices()` |
 | The **default output** changes | `onDefaultOutputChanged` → `refreshOutputState()` |
 | The **default input** changes | `onDefaultInputChanged` → `refreshInputState()` (never touches the route) |
+| The Mac's **own output level or mute** changes | device-scoped `VolumeScalar` / `Mute` listener → `onOutputLevelChanged` → `readOutputLevel()` (never touches the route) |
+| The Mac's **own input gain or mute** changes | same, input scope → `onInputLevelChanged` → `readInputLevel()` |
 | The machine wakes | `NSWorkspace.didWakeNotification` → `handleWake()` |
 | Permission is granted while running | `refreshPermission()` on app activation |
 | The watchdog sees a dead pipeline | `onNeedsRebuild` → `rebuildRoute()` |
@@ -190,6 +192,38 @@ purpose. Picking a different *existing* device in Control Center or the Sound
 pane adds and removes nothing, so `kAudioHardwarePropertyDevices` never fires
 for it — with only that listener the route went on feeding the old device and
 the picker showed a stale selection.
+
+> **The level listeners are separate again, and for the third time it is the
+> same lesson.** All three selectors above live on the **system object**, and
+> none of them says anything about a *level*. Pressing the volume keys changes
+> no device list, no default device — so nothing fired, and `masterVolume` was
+> only ever re-read inside `refreshOutputState()`. The app sat at whatever it
+> last happened to read while the Mac was somewhere else entirely: 19% on screen
+> against 81% of actual output.
+>
+> `AudioDeviceManager.observeLevels(outputDeviceID:inputDeviceID:)` installs
+> **device-scoped** listeners on the current default pair, and must be called
+> again whenever either default changes — these are bound to an `AudioObjectID`,
+> and ids are recycled, so one left on the old device is worse than none.
+>
+> The address set comes from `volumeAddresses(scope:)`, the same helper the read
+> path uses, filtered by `AudioObjectHasProperty`. It has to match the read set:
+> this Mac's speakers answer only the main element, plenty of interfaces expose
+> only the per-channel ones, and a listener on an address the device does not
+> implement is silently never delivered. `kAudioDevicePropertyMute` is added on
+> the same scope — F10 changes the mute without touching the scalar, so a slider
+> reading 81% for a silent Mac is the same bug wearing a different hat.
+>
+> Notifications are told apart by **scope**, not selector: the same
+> `VolumeScalar` arrives for output and input, and one USB interface can be both
+> defaults at once.
+>
+> One change arrives several times — a device answering both the virtual-main
+> selector and the scalar fired four notifications per volume step in testing.
+> `readOutputLevel()` therefore compares before publishing: assigning an
+> unchanged value to an `@Observable` property still invalidates every view
+> reading it, and a held volume key would otherwise re-render the mixer four
+> times per step.
 
 `refreshOutputState()` keys the "did it actually change?" test on the device
 **UID**, not the `AudioDeviceID`: ids are recycled as hardware comes and goes,
