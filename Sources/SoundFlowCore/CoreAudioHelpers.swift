@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import os
 
 // MARK: - Property address shorthand
 
@@ -11,6 +12,50 @@ public func caAddress(
 ) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: element)
 }
+
+// MARK: - Notification delivery
+
+/// Moves the HAL's property notifications onto a thread of its own, once per
+/// process. Call before installing any listener.
+///
+/// This is not a micro-optimisation, it is a correctness fix. From
+/// `AudioHardwareDeprecated.h`, on `kAudioHardwarePropertyRunLoop`:
+///
+/// > In 10.6 and later, the HAL will use the process's run loop (as defined by
+/// > `CFRunLoopGetMain()`) for this task. […] If the value for this property is
+/// > set to NULL, the HAL will return to its pre-10.6 behavior of creating and
+/// > managing its own thread for notifications.
+///
+/// So by default every `AudioObjectAddPropertyListener` callback is a main
+/// run-loop source in the default mode — and it therefore stops being delivered
+/// whenever something holds the run loop in another mode. A tracking menu or an
+/// open `MenuBarExtra` popover does exactly that, which is the app's primary
+/// surface: playback could start and stop with the mixer on screen and nothing
+/// fired until the popover closed.
+///
+/// Both listener callbacks in this module were already written for a HAL thread
+/// — they read one field and hop to main. This makes that true.
+public func caDetachNotificationRunLoop() {
+    detachRunLoopOnce.withLock { done in
+        guard !done else { return }
+        done = true
+
+        // The constant lives in `AudioHardwareDeprecated.h`, but the selector is
+        // very much alive: it is still how the HAL is told where to notify.
+        var addr = caAddress(kAudioHardwarePropertyRunLoop)
+        var value: UnsafeRawPointer? = nil
+        let status = withUnsafeMutablePointer(to: &value) { pointer in
+            AudioObjectSetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
+                UInt32(MemoryLayout<UnsafeRawPointer?>.size), pointer)
+        }
+        if status != noErr {
+            print("[CoreAudio] Could not detach the notification run loop: \(status)")
+        }
+    }
+}
+
+private let detachRunLoopOnce = OSAllocatedUnfairLock(initialState: false)
 
 // MARK: - Typed property readers
 //

@@ -21,7 +21,18 @@ enum SoundFlowLog {
 final class AppMix {
     let bundleID: String
     private(set) var pid: pid_t
+    /// The process object the tap is built on: whichever of this app's audio
+    /// processes is actually producing output, falling back to the first.
     private(set) var processObjectID: AudioObjectID
+
+    /// **Every** process object reporting this bundle id, not just the tapped
+    /// one. Chromium and Electron apps play from a helper process that reports
+    /// the parent's bundle id, so a row routinely stands for several. Kept so
+    /// the playback poll can re-read them all without re-enumerating the HAL.
+    ///
+    /// Not observable: nothing draws it, and republishing it on every refresh
+    /// would invalidate every row for a value the UI never reads.
+    @ObservationIgnored private(set) var processObjectIDs: [AudioObjectID] = []
 
     /// The name macOS reports. Often unhelpful for helper processes.
     let name: String
@@ -59,18 +70,31 @@ final class AppMix {
     /// Whether this app currently needs to be routed through the mixer.
     var needsTap: Bool { isActive && !isDRMProtected && (isMuted || volume < 0.999) }
 
+    /// Playing, but nothing of it reaches the speakers.
+    ///
+    /// `isPlaying` comes from the HAL and describes what the *app* emits, which
+    /// is upstream of our gain stage — so it stays true for an app the user has
+    /// turned all the way down. This is the term the row needs to draw that
+    /// state honestly. The threshold matches the one `muteSymbol` already uses.
+    var isSilenced: Bool { isMuted || volume < 0.01 }
+
     init(bundleID: String, pid: pid_t, processObjectID: AudioObjectID,
+         processObjectIDs: [AudioObjectID] = [],
          name: String, icon: NSImage?) {
         self.bundleID = bundleID
         self.pid = pid
         self.processObjectID = processObjectID
+        self.processObjectIDs = processObjectIDs.isEmpty ? [processObjectID]
+                                                         : processObjectIDs
         self.name = name
         self.icon = icon
     }
 
-    func refresh(pid: pid_t, processObjectID: AudioObjectID, isPlaying: Bool) {
+    func refresh(pid: pid_t, processObjectID: AudioObjectID,
+                 processObjectIDs: [AudioObjectID], isPlaying: Bool) {
         self.pid = pid
         self.processObjectID = processObjectID
+        self.processObjectIDs = processObjectIDs
         self.isPlaying = isPlaying
         self.isActive = true
     }
@@ -79,6 +103,7 @@ final class AppMix {
     func markInactive() {
         pid = 0
         processObjectID = AudioObjectID(kAudioObjectUnknown)
+        processObjectIDs = []
         isActive = false
         isPlaying = false
         // A future launch may not be DRM-protected; re-test rather than inherit.
@@ -91,6 +116,10 @@ final class AppMix {
 extension AppMix: Identifiable {
     nonisolated var id: String { bundleID }
 }
+
+/// What the mixer needs to label a row: everything else about an app comes from
+/// the HAL or from preferences.
+typealias AppDescriptor = (name: String, icon: NSImage?)
 
 // MARK: - MixerEngine
 
@@ -179,6 +208,9 @@ final class MixerEngine {
     private var customNames: [String: String] = [:]
     /// Only apps the user customised. Absent means `AppIconStyle.default`.
     private var iconStyles: [String: AppIconStyle] = [:]
+    /// Bundle id → name and icon, or `nil` for "this is not an app". See
+    /// `cachedBundleDescriptor(_:)`.
+    private var descriptorCache: [String: AppDescriptor?] = [:]
     private var watchdogFeedTimer: Timer?
     private var started = false
     /// Coalesces `UserDefaults` writes: a slider drag calls `persist` on every
@@ -188,7 +220,7 @@ final class MixerEngine {
     /// produces a fresh `RouteWatchdog`, so the budget has to live out here or
     /// `maxRecoveryAttempts` never bites.
     private var routeRecoveryAttempts = 0
-    private var sleepWakeObservers: [NSObjectProtocol] = []
+    private var workspaceObservers: [NSObjectProtocol] = []
 
     // MARK: - Lifecycle
 
@@ -237,17 +269,19 @@ final class MixerEngine {
         }
         deviceManager.startMonitoringDeviceChanges()
 
-        observeSleepWake()
+        observeWorkspace()
     }
 
     func stop() {
         stopWatchdogFeed()
+        stopPlaybackPoll()
+        visibleSurfaces = 0
         registry.stopMonitoring()
         deviceManager.stopMonitoringDeviceChanges()
 
         let center = NSWorkspace.shared.notificationCenter
-        sleepWakeObservers.forEach(center.removeObserver(_:))
-        sleepWakeObservers = []
+        workspaceObservers.forEach(center.removeObserver(_:))
+        workspaceObservers = []
 
         teardownRoute()
         flushPreferences()
@@ -261,9 +295,9 @@ final class MixerEngine {
     /// only if something is playing. Rebuilding on wake makes the recovery
     /// immediate, and dropping the route on sleep means no tap is left holding
     /// an app muted while the machine is suspended.
-    private func observeSleepWake() {
+    private func observeWorkspace() {
         let center = NSWorkspace.shared.notificationCenter
-        sleepWakeObservers = [
+        workspaceObservers = [
             // Synchronous, not a `Task` hop: the system does not wait for our
             // queue to drain before suspending, and a teardown that lands after
             // sleep is a teardown that did not happen.
@@ -274,6 +308,12 @@ final class MixerEngine {
             center.addObserver(forName: NSWorkspace.didWakeNotification,
                                object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.handleWake() }
+            },
+            // An app that was not installed when we last looked it up is the
+            // only way a cached "not an app" answer becomes wrong.
+            center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification,
+                               object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.invalidateUnresolvedDescriptors() }
             }
         ]
     }
@@ -391,24 +431,23 @@ final class MixerEngine {
         let existingByBundle = Dictionary(apps.map { ($0.bundleID, $0) },
                                           uniquingKeysWith: { first, _ in first })
 
-        for process in snapshot {
-            guard let bundleID = process.bundleID else { continue }
-            // A single app can own several audio processes (browser helpers);
-            // collapse them so the user sees one row per app.
-            guard !seen.contains(bundleID) else { continue }
-
-            guard let descriptor = describe(process: process, bundleID: bundleID) else { continue }
+        for group in groupByBundle(snapshot) {
+            let bundleID = group.bundleID
+            guard let descriptor = describe(process: group.representative,
+                                            bundleID: bundleID) else { continue }
             seen.insert(bundleID)
 
             if let existing = existingByBundle[bundleID] {
-                existing.refresh(pid: process.pid,
-                                 processObjectID: process.processObjectID,
-                                 isPlaying: process.isRunningOutput)
+                existing.refresh(pid: group.representative.pid,
+                                 processObjectID: group.representative.processObjectID,
+                                 processObjectIDs: group.processObjectIDs,
+                                 isPlaying: group.isPlaying)
                 updated.append(existing)
             } else {
                 let mix = AppMix(bundleID: bundleID,
-                                 pid: process.pid,
-                                 processObjectID: process.processObjectID,
+                                 pid: group.representative.pid,
+                                 processObjectID: group.representative.processObjectID,
+                                 processObjectIDs: group.processObjectIDs,
                                  name: descriptor.name,
                                  icon: descriptor.icon)
                 let saved = preferences[bundleID] ?? .default
@@ -416,7 +455,7 @@ final class MixerEngine {
                 mix.isMuted = saved.isMuted
                 mix.isFavorite = favorites.contains(bundleID)
                 mix.customName = customNames[bundleID]
-                mix.isPlaying = process.isRunningOutput
+                mix.isPlaying = group.isPlaying
                 updated.append(mix)
             }
         }
@@ -436,10 +475,62 @@ final class MixerEngine {
 
         apps = sortApps(updated)
 
-        let playingCount = updated.filter(\.isPlaying).count
-        SoundFlowLog.registry.debug("refreshApps: \(updated.count, privacy: .public) apps, \(playingCount, privacy: .public) playing")
+        let playing = updated.filter(\.isPlaying).map(\.bundleID)
+        SoundFlowLog.registry.debug("refreshApps: \(updated.count, privacy: .public) apps, playing: \(playing.joined(separator: ", "), privacy: .public)")
 
         syncRoute()
+    }
+
+    /// One row's worth of the HAL's process list.
+    private struct AppProcessGroup {
+        let bundleID: String
+        /// The process the row is built and tapped on.
+        let representative: AudioProcessInfo
+        /// Every process object with this bundle id, representative included.
+        let processObjectIDs: [AudioObjectID]
+        let isPlaying: Bool
+    }
+
+    /// Collapses the HAL's process list into one group per bundle id.
+    ///
+    /// A single app routinely owns several audio process objects: Chromium and
+    /// Electron apps (Chrome, Spotify, Discord, Slack, VS Code) play from a
+    /// helper process that reports the *parent's* bundle id.
+    ///
+    /// This used to keep the first process it saw and discard the rest, which
+    /// was a real bug. `kAudioHardwarePropertyProcessObjectList` has no defined
+    /// order, so when the silent main process sorted first its `IsRunningOutput`
+    /// of `0` became the row's answer and the playing helper beside it was
+    /// thrown away. The indicator then stayed dark for seconds — until the list
+    /// happened to reorder or the idle object was torn down — while every
+    /// notification in between was delivered on time and ignored.
+    ///
+    /// So `isPlaying` is the **union** across the group, and the representative
+    /// is whichever member is actually producing output. That second part also
+    /// points the tap at the process emitting the audio rather than an idle
+    /// sibling, which is what invariant 2 wants anyway.
+    private func groupByBundle(_ snapshot: [AudioProcessInfo]) -> [AppProcessGroup] {
+        var order: [String] = []
+        var members: [String: [AudioProcessInfo]] = [:]
+
+        for process in snapshot {
+            guard let bundleID = process.bundleID else { continue }
+            if members[bundleID] == nil {
+                members[bundleID] = []
+                order.append(bundleID)
+            }
+            members[bundleID]?.append(process)
+        }
+
+        return order.compactMap { bundleID in
+            guard let group = members[bundleID], let first = group.first else { return nil }
+            return AppProcessGroup(
+                bundleID: bundleID,
+                representative: group.first(where: \.isRunningOutput) ?? first,
+                processObjectIDs: group.map(\.processObjectID),
+                isPlaying: group.contains(where: \.isRunningOutput)
+            )
+        }
     }
 
     /// Builds a row for a starred app that has no live audio process.
@@ -448,7 +539,7 @@ final class MixerEngine {
     /// gets a row even if the bundle cannot be found, since the user chose that
     /// label deliberately; anything else unresolvable is skipped.
     private func makeInactiveFavorite(bundleID: String) -> AppMix? {
-        let descriptor = describeBundle(bundleID)
+        let descriptor = cachedBundleDescriptor(bundleID)
         guard descriptor != nil || customNames[bundleID] != nil else { return nil }
 
         let mix = AppMix(bundleID: bundleID,
@@ -479,18 +570,40 @@ final class MixerEngine {
     /// Resolves a user-facing name and icon, skipping processes that are not
     /// really applications (daemons, XPC helpers with no app bundle).
     private func describe(process: AudioProcessInfo,
-                          bundleID: String) -> (name: String, icon: NSImage?)? {
+                          bundleID: String) -> AppDescriptor? {
+        // Always asked fresh: it is an in-memory query against the running-app
+        // list, and it is the answer that must never be stale — an app that is
+        // running now but was not last time has to get its row.
         if let running = NSRunningApplication(processIdentifier: process.pid),
            let name = running.localizedName, running.bundleIdentifier != nil {
             return (name, running.icon)
         }
         // Helper processes (e.g. browser audio helpers) report the parent app's
         // bundle id, so fall back to looking the bundle up on disk.
-        return describeBundle(bundleID)
+        return cachedBundleDescriptor(bundleID)
+    }
+
+    /// `describeBundle` memoised, negative answers included.
+    ///
+    /// That lookup reaches LaunchServices and then the disk for an icon, and it
+    /// used to run for every unresolved process on every refresh — so daemons,
+    /// which can never resolve, were paying the most to be skipped again. A
+    /// bundle's name and icon do not change underneath us, so a positive is
+    /// kept for the session; negatives are dropped when an app launches, since
+    /// that is the one event that can make one wrong.
+    private func cachedBundleDescriptor(_ bundleID: String) -> AppDescriptor? {
+        if let cached = descriptorCache[bundleID] { return cached }
+        let resolved = describeBundle(bundleID)
+        descriptorCache[bundleID] = resolved
+        return resolved
+    }
+
+    private func invalidateUnresolvedDescriptors() {
+        descriptorCache = descriptorCache.filter { $0.value != nil }
     }
 
     /// Name and icon for an installed bundle, with no running process required.
-    private func describeBundle(_ bundleID: String) -> (name: String, icon: NSImage?)? {
+    private func describeBundle(_ bundleID: String) -> AppDescriptor? {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
         else { return nil }
         let name = FileManager.default.displayName(atPath: url.path)
@@ -752,6 +865,77 @@ final class MixerEngine {
         taps = []
         routedApps = []
         stopWatchdogFeed()
+    }
+
+    // MARK: - Playback poll
+
+    /// How many mixer surfaces are on screen. Both the window and the menu bar
+    /// popover host a `MixerView`, and both can be open at once.
+    private var visibleSurfaces = 0
+    private var playbackPollTimer: Timer?
+
+    /// Called by `MixerView` when it appears. Balanced by `endObservingPlayback()`.
+    func beginObservingPlayback() {
+        visibleSurfaces += 1
+        SoundFlowLog.registry.debug("playback poll: \(self.visibleSurfaces, privacy: .public) surface(s) visible")
+        startPlaybackPoll()
+    }
+
+    func endObservingPlayback() {
+        visibleSurfaces = max(0, visibleSurfaces - 1)
+        SoundFlowLog.registry.debug("playback poll: \(self.visibleSurfaces, privacy: .public) surface(s) visible")
+        if visibleSurfaces == 0 { stopPlaybackPoll() }
+    }
+
+    /// A backstop under the `IsRunningOutput` listeners, running only while the
+    /// user can actually see a row.
+    ///
+    /// The listeners are the real mechanism and this changes nothing when they
+    /// arrive on time. It exists because when they do *not*, the failure is
+    /// invisible: the indicator simply stays dark and the app looks like it did
+    /// not notice. Half a second is the cap on how long that can last.
+    ///
+    /// Cheap on purpose. It re-reads one `UInt32` per process object already in
+    /// `apps` — no `snapshot()`, which re-enumerates the HAL and reads a pid and
+    /// a bundle id for every process on the system, and no `describe()`. When
+    /// nothing has changed it does nothing at all: no publish, no re-sort, no
+    /// route work. Same discipline as the watchdog feed below — it stops the
+    /// moment there is nothing to watch.
+    private func startPlaybackPoll() {
+        guard playbackPollTimer == nil else { return }
+        playbackPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pollPlaybackState() }
+        }
+    }
+
+    private func stopPlaybackPoll() {
+        playbackPollTimer?.invalidate()
+        playbackPollTimer = nil
+    }
+
+    private func pollPlaybackState() {
+        // `endObservingPlayback()` is the primary signal, but `onDisappear` is
+        // SwiftUI's to deliver and the menu bar popover is not a window we own.
+        // Confirming something is actually on screen makes a missed one heal
+        // itself, instead of leaving a timer running for the rest of the
+        // session with nobody looking at it.
+        guard visibleSurfaces > 0, NSApp.windows.contains(where: \.isVisible) else {
+            visibleSurfaces = 0
+            stopPlaybackPoll()
+            return
+        }
+
+        let changed = apps.contains { app in
+            guard app.isActive, !app.processObjectIDs.isEmpty else { return false }
+            // Union across the group, exactly as `groupByBundle` computes it:
+            // one row can stand for a silent main process and a playing helper.
+            let playing = app.processObjectIDs.contains { registry.isRunningOutput($0) }
+            return playing != app.isPlaying
+        }
+        guard changed else { return }
+
+        SoundFlowLog.registry.debug("playback poll: state changed, refreshing")
+        refreshApps()
     }
 
     // MARK: - Watchdog expectation

@@ -174,6 +174,11 @@ public class AudioDeviceManager: @unchecked Sendable {
     /// Start listening for HAL device add/remove and default-device events.
     /// Safe to call multiple times; installs the listeners only once.
     public func startMonitoringDeviceChanges() {
+        // Same reason as in `AudioProcessRegistry.startMonitoring()`: the HAL
+        // notifies on the main run loop unless told otherwise, and these
+        // callbacks are written for a thread of their own.
+        caDetachNotificationRunLoop()
+
         listenerLock.lock()
         defer { listenerLock.unlock() }
         guard listenerContext == nil else { return }

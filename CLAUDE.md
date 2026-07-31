@@ -58,7 +58,7 @@ what destroys the live taps.
 | Path | Responsibility |
 | :--- | :--- |
 | `Sources/SoundFlowCore/` | Engine. No SwiftUI. Reusable from the CLI. |
-| `CoreAudioHelpers.swift` | `caAddress` / `caValue` / `caArray` / `caString` / `caSet` / `caStreamBuffers` / `caChannelCount` / `caDeviceUID` / `caDeviceID(forUID:)` / `caProcessObject(forPID:)`. **Use these instead of hand-rolling `AudioObjectGetPropertyData`.** |
+| `CoreAudioHelpers.swift` | `caAddress` / `caValue` / `caArray` / `caString` / `caSet` / `caStreamBuffers` / `caChannelCount` / `caDeviceUID` / `caDeviceID(forUID:)` / `caProcessObject(forPID:)` / `caDetachNotificationRunLoop()`. **Use these instead of hand-rolling `AudioObjectGetPropertyData`.** |
 | `AudioProcessRegistry.swift` | Who is playing audio, via `kAudioHardwarePropertyProcessObjectList` + per-process `IsRunningOutput` listeners. |
 | `ProcessTapEngine.swift` | `ProcessTap` create/destroy, `TapError` classification, orphan sweeping. |
 | `AggregateRoute.swift` | Private aggregate device: taps in, one physical output out. |
@@ -174,7 +174,23 @@ or a crash — rarely a compile error.
     unique (two identical interfaces) and can read "Unknown", which leaves the
     picker blank.
 
-16. **Permission granted while running must call `syncRoute()`.**
+16. **One app owns several process objects, so collapse by union.** Chromium and
+    Electron apps play from a helper that reports the parent's bundle id, and
+    `kAudioHardwarePropertyProcessObjectList` has no defined order.
+    `groupByBundle()` therefore ORs `IsRunningOutput` across the whole group and
+    taps whichever member is actually producing output. Keeping the first
+    process and discarding the rest — what this used to do — reads a coin flip:
+    a silent main process sorting first made `isPlaying` false while a playing
+    helper sat beside it, and the indicator stayed dark for seconds.
+
+17. **The HAL notifies on the main run loop unless told not to.** Left alone,
+    every property listener is a main run-loop source in the *default* mode, so
+    it stops being delivered while a menu or the `MenuBarExtra` popover holds
+    the run loop in tracking mode. `caDetachNotificationRunLoop()` must run
+    before any listener is installed. Both listener procs already assume a HAL
+    thread; this is what makes that true.
+
+18. **Permission granted while running must call `syncRoute()`.**
     `refreshPermission()` runs on every activation; without the sync the UI
     unblocks after the user returns from System Settings and the sliders do
     nothing until the process list happens to change.
@@ -185,7 +201,9 @@ or a crash — rarely a compile error.
 
 | Want to… | Touch |
 | :--- | :--- |
-| Change what appears in the mixer | `MixerEngine.refreshApps()` / `describe(process:bundleID:)` |
+| Change what appears in the mixer | `MixerEngine.refreshApps()` / `groupByBundle(_:)` / `describe(process:bundleID:)` |
+| Change the playing indicator | `AppRowView.PlayingIndicator` — `isPlaying` gates it, `AppMix.isSilenced` flattens it |
+| Debug "the indicator is late" | `log stream --predicate 'subsystem == "com.soundflow.app"' --level debug`. Starting output reaches the listener in ~150–400 ms; *stopping* takes the HAL ~8 s and no polling beats it — see `docs/ARCHITECTURE.md` §2 |
 | Change how an app is labelled | `AppMix.displayName` — never read `.name` in the UI |
 | Change row layout, add a per-app control | `AppRowView.swift` |
 | Change window vs menu bar differences | `MixerView.swift` (`compact`), `visibleCompactApps` |
