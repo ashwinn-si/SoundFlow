@@ -130,11 +130,10 @@ struct MixerView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
-
-                Divider()
 
                 ZStack(alignment: .top) {
                     if compactTab == .apps {
@@ -155,7 +154,8 @@ struct MixerView: View {
                         ))
                     }
                 }
-                .animation(.easeInOut(duration: 0.25), value: compactTab)
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: compactTab)
+                .clipped()
             }
 
             Divider()
@@ -165,14 +165,6 @@ struct MixerView: View {
 
     private var compactHeader: some View {
         VStack(spacing: 8) {
-            Picker("Output", selection: outputSelection) {
-                ForEach(visibleCompactOutputDevices) { device in
-                    Text(device.displayName).tag(device.id)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-
             if engine.hasMasterVolumeControl {
                 LevelSlider(
                     symbol: "speaker.fill",
@@ -189,13 +181,6 @@ struct MixerView: View {
                 Text("This device has no software volume control.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-            }
-
-            if let error = engine.routeError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(14)
@@ -270,7 +255,7 @@ struct MixerView: View {
         selection: Binding<AudioObjectID>,
         @ViewBuilder control: () -> Control
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .center, spacing: 10) {
             Picker(title, selection: selection) {
                 ForEach(devices) { device in
                     Text(device.displayName).tag(device.id)
@@ -278,15 +263,9 @@ struct MixerView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+            .frame(maxWidth: .infinity)
 
             control()
-
-            if let error = engine.routeError, title == "Output" {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
     }
 
