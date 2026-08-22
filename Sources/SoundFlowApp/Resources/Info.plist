@@ -18,9 +18,9 @@
     <key>CFBundleDisplayName</key>
     <string>SoundFlow</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>7</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2</string>
+    <string>1.2.1</string>
 
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>

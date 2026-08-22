@@ -136,16 +136,69 @@ struct MixerView: View {
 
                 Divider()
 
-                if compactTab == .apps {
-                    appList(visibleCompactApps) { allAppsEmpty }
-                } else {
-                    compactDevicesList
+                ZStack(alignment: .top) {
+                    if compactTab == .apps {
+                        VStack(spacing: 0) {
+                            compactHeader
+                            Divider()
+                            appList(visibleCompactApps) { allAppsEmpty }
+                        }
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading),
+                            removal: .move(edge: .leading)
+                        ))
+                    } else {
+                        compactDevicesList
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing),
+                            removal: .move(edge: .trailing)
+                        ))
+                    }
                 }
+                .animation(.easeInOut(duration: 0.25), value: compactTab)
             }
 
             Divider()
             footer
         }
+    }
+
+    private var compactHeader: some View {
+        VStack(spacing: 8) {
+            Picker("Output", selection: outputSelection) {
+                ForEach(visibleCompactOutputDevices) { device in
+                    Text(device.displayName).tag(device.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+
+            if engine.hasMasterVolumeControl {
+                LevelSlider(
+                    symbol: "speaker.fill",
+                    value: Binding(
+                        get: { Double(engine.masterVolume) },
+                        set: { engine.setMasterVolume(Float($0)) }
+                    ),
+                    isMuted: Binding(
+                        get: { engine.isOutputMuted },
+                        set: { engine.setOutputMuted($0) }
+                    )
+                )
+            } else {
+                Text("This device has no software volume control.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            if let error = engine.routeError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(14)
     }
 
     private var compactDevicesList: some View {
