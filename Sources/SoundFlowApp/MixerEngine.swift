@@ -199,6 +199,8 @@ final class MixerEngine {
     private var preferences: [String: AppPreference] = [:]
     private var favorites: Set<String> = []
     private var customNames: [String: String] = [:]
+    private var favoriteDevices: Set<String> = []
+    private var customDeviceNames: [String: String] = [:]
     /// Only apps the user customised. Absent means `AppIconStyle.default`.
     private var iconStyles: [String: AppIconStyle] = [:]
     /// Bundle id → name and icon, or `nil` for "this is not an app". See
@@ -229,6 +231,8 @@ final class MixerEngine {
         preferences = Preferences.load()
         favorites = Preferences.loadFavorites()
         customNames = Preferences.loadCustomNames()
+        favoriteDevices = Preferences.loadFavoriteDevices()
+        customDeviceNames = Preferences.loadCustomDeviceNames()
         iconStyles = Preferences.loadIconStyles()
 
         refreshDevices()
@@ -364,7 +368,12 @@ final class MixerEngine {
     // MARK: - Devices
 
     func refreshDevices() {
-        let all = deviceManager.getAllDevices()
+        let all = deviceManager.getAllDevices().map { device in
+            var updated = device
+            updated.isFavorite = favoriteDevices.contains(device.uid)
+            updated.customName = customDeviceNames[device.uid]
+            return updated
+        }
         outputDevices = all.filter(\.isOutput)
         inputDevices = all.filter(\.isInput)
         refreshOutputState()
@@ -843,6 +852,30 @@ final class MixerEngine {
             apps = sortApps(apps)
         }
     }
+
+    // MARK: - Device Preferences
+
+    func renameDevice(_ device: AudioDeviceItem, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == device.name {
+            customDeviceNames.removeValue(forKey: device.uid)
+        } else {
+            customDeviceNames[device.uid] = trimmed
+        }
+        Preferences.saveCustomDeviceNames(customDeviceNames)
+        refreshDevices()
+    }
+
+    func toggleDeviceFavorite(_ device: AudioDeviceItem) {
+        if favoriteDevices.contains(device.uid) {
+            favoriteDevices.remove(device.uid)
+        } else {
+            favoriteDevices.insert(device.uid)
+        }
+        Preferences.saveFavoriteDevices(favoriteDevices)
+        refreshDevices()
+    }
+
 
     // MARK: - Route management
 

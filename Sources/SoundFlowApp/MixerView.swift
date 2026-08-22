@@ -20,6 +20,10 @@ struct MixerView: View {
     var compact = false
 
     @AppStorage(Preferences.themeKey) private var themeID = Themes.system.id
+    enum CompactTab {
+        case apps, devices
+    }
+    @State private var compactTab: CompactTab = .apps
     @State private var tab: MixerTab = .allApps
     /// The app whose name and icon are being edited. Hosted here rather than in
     /// each row so there is one sheet, not one per visible app.
@@ -120,9 +124,23 @@ struct MixerView: View {
             if engine.permission == .denied {
                 PermissionView(engine: engine)
             } else {
-                compactHeader
+                Picker("View", selection: $compactTab) {
+                    Text("Audio").tag(CompactTab.apps)
+                    Text("Devices").tag(CompactTab.devices)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+
                 Divider()
-                appList(visibleCompactApps) { allAppsEmpty }
+
+                if compactTab == .apps {
+                    appList(visibleCompactApps) { allAppsEmpty }
+                } else {
+                    compactDevicesList
+                }
             }
 
             Divider()
@@ -130,44 +148,93 @@ struct MixerView: View {
         }
     }
 
-    /// Output device and master level only. Input lives in the Devices tab —
-    /// switching a microphone is not a menu bar errand.
-    private var compactHeader: some View {
-        VStack(spacing: 10) {
-            // Full width, unlabelled: at 320pt the device name is the only thing
-            // worth the room, and "Output" above a speaker slider says nothing
-            // the slider does not.
-            Picker("Output", selection: outputSelection) {
-                ForEach(engine.outputDevices) { device in
-                    Text(device.name).tag(device.id)
+    private var compactDevicesList: some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                if !visibleCompactOutputDevices.isEmpty {
+                    compactDeviceCard(
+                        title: "Output",
+                        symbol: "speaker.wave.2.fill",
+                        devices: visibleCompactOutputDevices,
+                        selection: outputSelection
+                    ) {
+                        if engine.hasMasterVolumeControl {
+                            LevelSlider(
+                                symbol: "speaker.fill",
+                                value: Binding(
+                                    get: { Double(engine.masterVolume) },
+                                    set: { engine.setMasterVolume(Float($0)) }
+                                ),
+                                isMuted: Binding(
+                                    get: { engine.isOutputMuted },
+                                    set: { engine.setOutputMuted($0) }
+                                )
+                            )
+                        } else {
+                            Text("This device has no software volume control.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+
+                if !visibleCompactInputDevices.isEmpty {
+                    compactDeviceCard(
+                        title: "Input",
+                        symbol: "mic.fill",
+                        devices: visibleCompactInputDevices,
+                        selection: inputSelection
+                    ) {
+                        if engine.hasInputVolumeControl {
+                            LevelSlider(
+                                symbol: "mic.fill",
+                                value: Binding(
+                                    get: { Double(engine.inputVolume) },
+                                    set: { engine.setInputVolume(Float($0)) }
+                                ),
+                                isMuted: Binding(
+                                    get: { engine.isInputMuted },
+                                    set: { engine.setInputMuted($0) }
+                                )
+                            )
+                        } else {
+                            Text("This microphone has no software gain control.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+            .padding(14)
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private func compactDeviceCard<Control: View>(
+        title: String,
+        symbol: String,
+        devices: [AudioDeviceItem],
+        selection: Binding<AudioObjectID>,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker(title, selection: selection) {
+                ForEach(devices) { device in
+                    Text(device.displayName).tag(device.id)
                 }
             }
             .labelsHidden()
             .pickerStyle(.menu)
 
-            if engine.hasMasterVolumeControl {
-                LevelSlider(
-                    symbol: "speaker.fill",
-                    value: Binding(
-                        get: { Double(engine.masterVolume) },
-                        set: { engine.setMasterVolume(Float($0)) }
-                    ),
-                    isMuted: Binding(
-                        get: { engine.isOutputMuted },
-                        set: { engine.setOutputMuted($0) }
-                    )
-                )
-            }
+            control()
 
-            if let error = engine.routeError {
+            if let error = engine.routeError, title == "Output" {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
     private var footer: some View {
@@ -218,6 +285,17 @@ struct MixerView: View {
         )
     }
 
+    private var inputSelection: Binding<AudioObjectID> {
+        Binding(
+            get: { engine.inputDeviceID },
+            set: { newID in
+                if let device = engine.inputDevices.first(where: { $0.id == newID }) {
+                    engine.selectInputDevice(device)
+                }
+            }
+        )
+    }
+
     // MARK: - Apps
 
     /// The menu bar lists only starred apps — unless nothing is starred yet, in
@@ -225,6 +303,16 @@ struct MixerView: View {
     private var visibleCompactApps: [AppMix] {
         let favorites = engine.favoriteApps
         return favorites.isEmpty ? engine.apps : favorites
+    }
+
+    private var visibleCompactOutputDevices: [AudioDeviceItem] {
+        let favs = engine.outputDevices.filter(\.isFavorite)
+        return favs.isEmpty ? engine.outputDevices : favs
+    }
+
+    private var visibleCompactInputDevices: [AudioDeviceItem] {
+        let favs = engine.inputDevices.filter(\.isFavorite)
+        return favs.isEmpty ? engine.inputDevices : favs
     }
 
     @ViewBuilder

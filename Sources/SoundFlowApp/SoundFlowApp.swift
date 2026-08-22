@@ -45,6 +45,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
         }
         engine.start()
+
+        // Accessory apps do not automatically come to the front when their
+        // windows are clicked in Mission Control or in the background.
+        NotificationCenter.default.addObserver(self, selector: #selector(windowDidBecomeKey(_:)), name: NSWindow.didBecomeKeyNotification, object: nil)
+    }
+
+    @objc private func windowDidBecomeKey(_ notification: Notification) {
+        if let window = notification.object as? NSWindow, window.level == .normal {
+            NSApp.activate()
+        }
     }
 
     /// Returning from System Settings should update the permission state — and

@@ -9,6 +9,10 @@ public struct AudioDeviceItem: Identifiable {
     public let isOutput: Bool
     public let isInput: Bool
     public let transportType: String
+    public var customName: String? = nil
+    public var isFavorite: Bool = false
+
+    public var displayName: String { customName ?? name }
 }
 
 public class AudioDeviceManager: @unchecked Sendable {

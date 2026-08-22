@@ -8,6 +8,7 @@ import SoundFlowCore
 /// occasionally, so it does not deserve permanent space above the app list.
 struct DevicesView: View {
     let engine: MixerEngine
+    @State private var editing: AudioDeviceItem?
 
     var body: some View {
         ScrollView {
@@ -71,6 +72,9 @@ struct DevicesView: View {
             }
             .padding(14)
         }
+        .sheet(item: $editing) { device in
+            CustomizeDeviceSheet(device: device, engine: engine)
+        }
     }
 
     // MARK: - Pieces
@@ -85,14 +89,38 @@ struct DevicesView: View {
         @ViewBuilder control: () -> Control
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+            HStack {
+                Label(title, systemImage: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                Spacer()
+
+                if let detail {
+                    Button {
+                        engine.toggleDeviceFavorite(detail)
+                    } label: {
+                        Image(systemName: detail.isFavorite ? "star.fill" : "star")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(detail.isFavorite ? Color.yellow : .secondary)
+                    .help("Star to show in menu bar")
+                    
+                    Button {
+                        editing = detail
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Rename device")
+                }
+            }
 
             Picker(title, selection: selection) {
                 ForEach(devices) { device in
-                    Text(device.name).tag(device.id)
+                    Text(device.displayName).tag(device.id)
                 }
             }
             .labelsHidden()

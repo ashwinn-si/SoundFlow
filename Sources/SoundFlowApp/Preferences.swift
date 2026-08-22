@@ -16,7 +16,9 @@ enum Preferences {
 
     private static let storeKey = "SoundFlow.appPreferences"
     private static let favoritesKey = "SoundFlow.favoriteApps"
+    private static let favoriteDevicesKey = "SoundFlow.favoriteDevices"
     private static let customNamesKey = "SoundFlow.customNames"
+    private static let customDeviceNamesKey = "SoundFlow.customDeviceNames"
     private static let iconStylesKey = "SoundFlow.appIconStyles"
     static let hideDockIconKey = "SoundFlow.hideDockIcon"
     static let themeKey = "SoundFlow.theme"
@@ -51,6 +53,14 @@ enum Preferences {
         UserDefaults.standard.set(Array(favorites), forKey: favoritesKey)
     }
 
+    static func loadFavoriteDevices() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: favoriteDevicesKey) ?? [])
+    }
+
+    static func saveFavoriteDevices(_ favorites: Set<String>) {
+        UserDefaults.standard.set(Array(favorites), forKey: favoriteDevicesKey)
+    }
+
     // MARK: - Custom names
 
     /// User-chosen display names, keyed by bundle id. The system name for an
@@ -63,6 +73,14 @@ enum Preferences {
 
     static func saveCustomNames(_ names: [String: String]) {
         UserDefaults.standard.set(names, forKey: customNamesKey)
+    }
+
+    static func loadCustomDeviceNames() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: customDeviceNamesKey) as? [String: String] ?? [:]
+    }
+
+    static func saveCustomDeviceNames(_ names: [String: String]) {
+        UserDefaults.standard.set(names, forKey: customDeviceNamesKey)
     }
 
     // MARK: - Icon styles
